@@ -1,362 +1,528 @@
---[[
-	MainHUDClient (LocalScript)
-	Local: StarterGui > MainHUD (ScreenGui) > MainHUDClient (LocalScript)
 
-	Toda a interface é criada por este script (você não precisa montar nada à mão).
-	Mostra:
-	- Barra de progresso da coleta (com botão X de cancelar, 44px para toque)
-	- Avisos "+3 Madeira" e mensagens de erro
-	- Contadores de recursos (lado esquerdo)
-	O cliente NÃO decide nada: só exibe o que o servidor manda e pode pedir "Cancel".
+--[[
+    InventoryClient v2
+    Mochila com seleção, scroll, drop, lixeira e upgrades.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local StarterGui = game:GetService("StarterGui")
-local CollectionService = game:GetService("CollectionService")
 
 local player = Players.LocalPlayer
 local gui = script.Parent
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ResourceConfig = require(Modules:WaitForChild("ResourceConfig"))
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local CollectRemote = Remotes:WaitForChild("CollectResource")
-local InventoryRemote = Remotes:WaitForChild("UpdateInventory")
 
-local WHITE = Color3.fromRGB(255, 255, 255)
-local PANEL = Color3.fromRGB(18, 26, 38)
+local events = ReplicatedStorage:WaitForChild("Remotes")
+local inventoryRemote = events:WaitForChild("UpdateInventory")
+local upgradeRequest = events:WaitForChild("ToolUpgradeRequest")
+local upgradeUpdate = events:WaitForChild("ToolUpgradeUpdate")
 
--- ===========================================================================
--- UTILITÁRIOS
--- ===========================================================================
+gui.ResetOnSpawn = false
 
-local function create(className, props, parent)
-	local inst = Instance.new(className)
-	for key, value in pairs(props) do
-		inst[key] = value
+local inventory = {}
+local tools = {
+	Axe = 1,
+	Pickaxe = 1,
+}
+
+local selectedItem
+local itemButtons = {}
+
+local function create(className, properties, parent)
+	local object = Instance.new(className)
+
+	for property, value in pairs(properties) do
+		object[property] = value
 	end
-	inst.Parent = parent
-	return inst
+
+	object.Parent = parent
+	return object
 end
 
-local function rounded(parent, radius)
-	return create("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+local function corner(parent, radius)
+	create("UICorner", {
+		CornerRadius = UDim.new(0, radius or 10),
+	}, parent)
 end
 
--- O inventário padrão do Roblox (hotbar) atrapalha a ferramenta temporária de coleta
-task.spawn(function()
-	for _ = 1, 10 do
-		local ok = pcall(function()
-			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
-		end)
-		if ok then
-			break
-		end
-		task.wait(0.5)
-	end
-end)
+local function stroke(parent, color, transparency)
+	create("UIStroke", {
+		Color = color or Color3.fromRGB(75, 90, 105),
+		Transparency = transparency or 0.25,
+		Thickness = 1,
+	}, parent)
+end
 
--- ===========================================================================
--- BARRA DE PROGRESSO
--- ===========================================================================
+local function tween(object, properties, duration)
+	TweenService:Create(
+		object,
+		TweenInfo.new(duration or 0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		properties
+	):Play()
+end
 
-local bar = create("Frame", {
-	Name = "GatherBar",
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.fromScale(0.5, 0.86),
-	Size = UDim2.fromScale(0.38, 0.08),
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.12,
+-- BOTÃO PARA ABRIR
+local toggle = create("TextButton", {
+	Name = "InventoryToggleButton",
+	Size = UDim2.fromOffset(132, 46),
+	Position = UDim2.new(1, -150, 1, -65),
+	BackgroundColor3 = Color3.fromRGB(43, 119, 79),
+	Text = "??  MOCHILA",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 15,
+	Font = Enum.Font.GothamBold,
+	AutoButtonColor = false,
+	ZIndex = 20,
+}, gui)
+
+corner(toggle, 12)
+
+-- PAINEL PRINCIPAL
+local main = create("Frame", {
+	Name = "InventoryPanel",
+	Size = UDim2.fromOffset(570, 430),
+	Position = UDim2.fromScale(0.5, 0.5),
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	BackgroundColor3 = Color3.fromRGB(24, 31, 39),
+	BorderSizePixel = 0,
 	Visible = false,
+	ClipsDescendants = true,
 }, gui)
-rounded(bar, 12)
-create("UIStroke", { Color = WHITE, Transparency = 0.8, Thickness = 1.5 }, bar)
-create("UISizeConstraint", { MinSize = Vector2.new(260, 56), MaxSize = Vector2.new(480, 76) }, bar)
 
-local barLabel = create("TextLabel", {
-	Name = "Label",
+corner(main, 16)
+stroke(main, Color3.fromRGB(85, 110, 125), 0.15)
+
+-- CABEÇALHO
+local header = create("Frame", {
+	Size = UDim2.new(1, 0, 0, 62),
+	BackgroundColor3 = Color3.fromRGB(34, 45, 54),
+	BorderSizePixel = 0,
+}, main)
+
+local title = create("TextLabel", {
+	Size = UDim2.new(1, -75, 1, 0),
+	Position = UDim2.fromOffset(20, 0),
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 14, 0, 4),
-	Size = UDim2.new(1, -72, 0.45, 0),
+	Text = "??  SUA MOCHILA",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 21,
 	Font = Enum.Font.GothamBold,
-	TextScaled = true,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	TextColor3 = WHITE,
-	Text = "",
-}, bar)
+}, header)
 
-local track = create("Frame", {
-	Name = "Track",
-	Position = UDim2.new(0, 14, 0.58, 0),
-	Size = UDim2.new(1, -72, 0.28, 0),
-	BackgroundColor3 = Color3.fromRGB(45, 58, 76),
-}, bar)
-rounded(track, 999)
-
-local fill = create("Frame", {
-	Name = "Fill",
-	Size = UDim2.fromScale(0, 1),
-	BackgroundColor3 = Color3.fromRGB(110, 200, 110),
-}, track)
-rounded(fill, 999)
-
-local cancelButton = create("TextButton", {
-	Name = "Cancel",
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -8, 0.5, 0),
-	Size = UDim2.fromOffset(44, 44),
-	BackgroundColor3 = Color3.fromRGB(190, 70, 70),
+local close = create("TextButton", {
+	Size = UDim2.fromOffset(36, 36),
+	Position = UDim2.new(1, -48, 0.5, -18),
+	BackgroundColor3 = Color3.fromRGB(170, 67, 67),
+	Text = "?",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 17,
 	Font = Enum.Font.GothamBold,
-	TextScaled = true,
-	TextColor3 = WHITE,
-	Text = "X",
-}, bar)
-rounded(cancelButton, 10)
+	AutoButtonColor = false,
+}, header)
+
+corner(close, 9)
+
+-- CAPACIDADE
+local capacity = create("TextLabel", {
+	Size = UDim2.new(1, -30, 0, 28),
+	Position = UDim2.fromOffset(15, 70),
+	BackgroundTransparency = 1,
+	Text = "Capacidade: 0 / 100",
+	TextColor3 = Color3.fromRGB(180, 220, 190),
+	TextSize = 14,
+	Font = Enum.Font.GothamMedium,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, main)
+
+-- LISTA COM SCROLL
+local list = create("ScrollingFrame", {
+	Name = "ItemList",
+	Size = UDim2.fromOffset(255, 235),
+	Position = UDim2.fromOffset(15, 105),
+	BackgroundColor3 = Color3.fromRGB(31, 40, 49),
+	BorderSizePixel = 0,
+	ScrollBarThickness = 5,
+	ScrollBarImageColor3 = Color3.fromRGB(100, 160, 125),
+	CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, main)
+
+corner(list, 10)
+
+local listLayout = create("UIListLayout", {
+	Padding = UDim.new(0, 6),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, list)
+
 create("UIPadding", {
-	PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-	PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
-}, cancelButton)
+	PaddingTop = UDim.new(0, 8),
+	PaddingBottom = UDim.new(0, 8),
+	PaddingLeft = UDim.new(0, 8),
+	PaddingRight = UDim.new(0, 8),
+}, list)
 
-local currentTween = nil
+-- DETALHES DO ITEM
+local details = create("Frame", {
+	Size = UDim2.fromOffset(270, 235),
+	Position = UDim2.fromOffset(285, 105),
+	BackgroundColor3 = Color3.fromRGB(31, 40, 49),
+	BorderSizePixel = 0,
+}, main)
 
-local function hideBar()
-	if currentTween then
-		currentTween:Cancel()
-		currentTween = nil
-	end
-	bar.Visible = false
-	fill.Size = UDim2.fromScale(0, 1)
+corner(details, 10)
+
+local itemIcon = create("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 55),
+	Position = UDim2.fromOffset(10, 10),
+	BackgroundTransparency = 1,
+	Text = "??",
+	TextSize = 38,
+	Font = Enum.Font.Gotham,
+}, details)
+
+local itemName = create("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 30),
+	Position = UDim2.fromOffset(10, 65),
+	BackgroundTransparency = 1,
+	Text = "Selecione um item",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 17,
+	Font = Enum.Font.GothamBold,
+	TextWrapped = true,
+}, details)
+
+local itemAmount = create("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 24),
+	Position = UDim2.fromOffset(10, 97),
+	BackgroundTransparency = 1,
+	Text = "",
+	TextColor3 = Color3.fromRGB(180, 205, 190),
+	TextSize = 13,
+	Font = Enum.Font.Gotham,
+}, details)
+
+local itemDescription = create("TextLabel", {
+	Size = UDim2.new(1, -24, 0, 55),
+	Position = UDim2.fromOffset(12, 125),
+	BackgroundTransparency = 1,
+	Text = "Escolha um item na lista para ver os detalhes.",
+	TextColor3 = Color3.fromRGB(190, 195, 205),
+	TextSize = 12,
+	Font = Enum.Font.Gotham,
+	TextWrapped = true,
+	TextYAlignment = Enum.TextYAlignment.Top,
+}, details)
+
+local function actionButton(name, text, x, color)
+	local button = create("TextButton", {
+		Name = name,
+		Size = UDim2.fromOffset(112, 34),
+		Position = UDim2.fromOffset(x, 190),
+		BackgroundColor3 = color,
+		Text = text,
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 12,
+		Font = Enum.Font.GothamBold,
+		AutoButtonColor = false,
+	}, details)
+
+	corner(button, 8)
+	return button
 end
 
-local function showBar(text, duration)
-	hideBar()
-	barLabel.Text = text
-	bar.Visible = true
-	currentTween = TweenService:Create(fill, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-		Size = UDim2.fromScale(1, 1),
-	})
-	currentTween:Play()
+local dropButton = actionButton(
+	"DropButton",
+	"?? DROPAR 1",
+	12,
+	Color3.fromRGB(62, 115, 155)
+)
+
+local trashButton = actionButton(
+	"TrashButton",
+	"??? LIXEIRA",
+	140,
+	Color3.fromRGB(155, 72, 72)
+)
+
+-- UPGRADES
+local upgradeTitle = create("TextLabel", {
+	Size = UDim2.new(1, -30, 0, 25),
+	Position = UDim2.fromOffset(15, 350),
+	BackgroundTransparency = 1,
+	Text = "??  MELHORIAS DE FERRAMENTAS",
+	TextColor3 = Color3.new(1, 1, 1),
+	TextSize = 14,
+	Font = Enum.Font.GothamBold,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, main)
+
+local function makeUpgradeButton(name, x)
+	local button = create("TextButton", {
+		Name = name,
+		Size = UDim2.fromOffset(260, 42),
+		Position = UDim2.fromOffset(x, 380),
+		BackgroundColor3 = Color3.fromRGB(65, 105, 75),
+		Text = "",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 12,
+		Font = Enum.Font.GothamBold,
+		TextWrapped = true,
+		AutoButtonColor = false,
+	}, main)
+
+	corner(button, 9)
+	return button
 end
 
-cancelButton.Activated:Connect(function()
-	CollectRemote:FireServer("Cancel")
-	hideBar()
+local axeButton = makeUpgradeButton("AxeUpgrade", 15)
+local pickaxeButton = makeUpgradeButton("PickaxeUpgrade", 295)
+
+axeButton.MouseButton1Click:Connect(function()
+	upgradeRequest:FireServer("Upgrade", "Axe")
 end)
 
--- ===========================================================================
--- AVISOS (toasts)
--- ===========================================================================
+pickaxeButton.MouseButton1Click:Connect(function()
+	upgradeRequest:FireServer("Upgrade", "Pickaxe")
+end)
 
-local toastHolder = create("Frame", {
-	Name = "Toasts",
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.fromScale(0.5, 0.78),
-	Size = UDim2.fromScale(0.4, 0.3),
-	BackgroundTransparency = 1,
-}, gui)
-create("UISizeConstraint", { MinSize = Vector2.new(240, 0), MaxSize = Vector2.new(420, 400) }, toastHolder)
-create("UIListLayout", {
-	FillDirection = Enum.FillDirection.Vertical,
-	HorizontalAlignment = Enum.HorizontalAlignment.Center,
-	VerticalAlignment = Enum.VerticalAlignment.Bottom,
-	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 6),
-}, toastHolder)
+local function getCostText(toolName, nextTier)
+	local costs = ResourceConfig.ToolUpgradeCosts[toolName]
+	local cost = costs and costs[nextTier]
 
-local toastCounter = 0
-local MAX_TOASTS = 5
-
-local function showToast(text, color)
-	toastCounter += 1
-
-	-- limita a quantidade na tela
-	local existing = {}
-	for _, child in ipairs(toastHolder:GetChildren()) do
-		if child:IsA("TextLabel") then
-			table.insert(existing, child)
-		end
-	end
-	table.sort(existing, function(a, b)
-		return a.LayoutOrder < b.LayoutOrder
-	end)
-	while #existing >= MAX_TOASTS do
-		existing[1]:Destroy()
-		table.remove(existing, 1)
+	if not cost then
+		return "NÍVEL MÁXIMO"
 	end
 
-	local label = create("TextLabel", {
-		Name = "Toast",
-		LayoutOrder = toastCounter,
-		Size = UDim2.new(1, 0, 0, 36),
-		BackgroundColor3 = PANEL,
-		BackgroundTransparency = 0.2,
-		Font = Enum.Font.GothamBold,
-		TextScaled = true,
-		TextColor3 = color or WHITE,
-		Text = text,
-	}, toastHolder)
-	rounded(label, 10)
-	create("UIPadding", {
-		PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
-		PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
-	}, label)
+	local parts = {}
 
-	task.delay(2.4, function()
-		if label.Parent then
-			local info = TweenInfo.new(0.4)
-			TweenService:Create(label, info, { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
-			task.delay(0.45, function()
-				label:Destroy()
-			end)
-		end
-	end)
+	for item, amount in pairs(cost) do
+		local definition = ResourceConfig.Items[item]
+		local emoji = definition and definition.Emoji or "??"
+		table.insert(parts, emoji .. " " .. amount)
+	end
+
+	table.sort(parts)
+	return table.concat(parts, "  ")
 end
 
--- ===========================================================================
--- CONTADORES DE RECURSOS
--- ===========================================================================
+local function updateTools()
+	local axeTier = tools.Axe or 1
+	local pickTier = tools.Pickaxe or 1
 
-local panel = create("Frame", {
-	Name = "Counters",
-	AnchorPoint = Vector2.new(0, 0.5),
-	Position = UDim2.new(0, 10, 0.45, 0),
-	Size = UDim2.fromOffset(170, 0),
-	AutomaticSize = Enum.AutomaticSize.Y,
-	BackgroundColor3 = PANEL,
-	BackgroundTransparency = 0.3,
-}, gui)
-rounded(panel, 12)
-create("UIPadding", {
-	PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-	PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
-}, panel)
-create("UIListLayout", {
-	SortOrder = Enum.SortOrder.LayoutOrder,
-	Padding = UDim.new(0, 4),
-}, panel)
+	local axeNext = axeTier + 1
+	local pickNext = pickTier + 1
 
-local countLabels = {}
-
-do
-	local ordered = {}
-	for key, def in pairs(ResourceConfig.Items) do
-		table.insert(ordered, { Key = key, Def = def })
+	if axeTier >= 3 then
+		axeButton.Text = "?? MACHADO • NÍVEL MÁXIMO"
+		axeButton.BackgroundColor3 = Color3.fromRGB(75, 85, 75)
+	else
+		axeButton.Text = "?? MACHADO • NÍVEL " .. axeTier
+			.. " ? " .. axeNext .. "\n" .. getCostText("Axe", axeNext)
+		axeButton.BackgroundColor3 = Color3.fromRGB(65, 105, 75)
 	end
-	table.sort(ordered, function(a, b)
-		return (a.Def.Order or 99) < (b.Def.Order or 99)
-	end)
 
-	for index, entry in ipairs(ordered) do
-		local row = create("Frame", {
-			Name = entry.Key,
-			LayoutOrder = index,
-			Size = UDim2.new(1, 0, 0, 26),
-			BackgroundTransparency = 1,
-		}, panel)
-
-		local chip = create("Frame", {
-			Size = UDim2.fromOffset(14, 14),
-			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.fromScale(0, 0.5),
-			BackgroundColor3 = entry.Def.Color,
-		}, row)
-		rounded(chip, 4)
-
-		create("TextLabel", {
-			Name = "Name",
-			BackgroundTransparency = 1,
-			Position = UDim2.new(0, 22, 0, 0),
-			Size = UDim2.new(1, -66, 1, 0),
-			Font = Enum.Font.Gotham,
-			TextScaled = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextColor3 = WHITE,
-			Text = entry.Def.DisplayName,
-		}, row)
-
-		countLabels[entry.Key] = create("TextLabel", {
-			Name = "Count",
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.new(0, 40, 1, 0),
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			TextScaled = true,
-			TextXAlignment = Enum.TextXAlignment.Right,
-			TextColor3 = WHITE,
-			Text = "0",
-		}, row)
+	if pickTier >= 3 then
+		pickaxeButton.Text = "?? PICARETA • NÍVEL MÁXIMO"
+		pickaxeButton.BackgroundColor3 = Color3.fromRGB(75, 85, 75)
+	else
+		pickaxeButton.Text = "?? PICARETA • NÍVEL " .. pickTier
+			.. " ? " .. pickNext .. "\n" .. getCostText("Pickaxe", pickNext)
+		pickaxeButton.BackgroundColor3 = Color3.fromRGB(65, 105, 75)
 	end
 end
 
-local receivedInventory = false
+local function selectItem(item)
+	selectedItem = item
 
-InventoryRemote.OnClientEvent:Connect(function(snapshot)
-	if type(snapshot) ~= "table" then
+	local definition = ResourceConfig.Items[item]
+	local amount = inventory[item] or 0
+
+	if not definition or amount <= 0 then
+		selectedItem = nil
+		itemIcon.Text = "??"
+		itemName.Text = "Selecione um item"
+		itemAmount.Text = ""
+		itemDescription.Text = "Escolha um item na lista para ver os detalhes."
 		return
 	end
-	receivedInventory = true
-	for key, label in pairs(countLabels) do
-		local count = snapshot[key]
-		label.Text = tostring(type(count) == "number" and count or 0)
+
+	itemIcon.Text = definition.Emoji or "??"
+	itemName.Text = definition.DisplayName or item
+	itemAmount.Text = "Quantidade: " .. amount
+	itemDescription.Text = definition.Description or "Recurso coletado na ilha."
+
+	if definition.Food then
+		itemDescription.Text ..= "\n??? Recupera " .. (definition.HungerRestore or 0) .. " de fome."
+	end
+
+	for itemNameKey, button in pairs(itemButtons) do
+		local active = itemNameKey == item
+		button.BackgroundColor3 = active
+			and Color3.fromRGB(58, 105, 83)
+			or Color3.fromRGB(42, 52, 62)
+	end
+end
+
+local function clearList()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+
+	table.clear(itemButtons)
+end
+
+local function updateInventory()
+	clearList()
+
+	local used = 0
+	local items = {}
+
+	for item, amount in pairs(inventory) do
+		local definition = ResourceConfig.Items[item]
+
+		if definition and type(amount) == "number" and amount > 0 then
+			used += amount
+
+			table.insert(items, {
+				Name = item,
+				Amount = amount,
+				Order = definition.Order or 999,
+			})
+		end
+	end
+
+	table.sort(items, function(a, b)
+		return a.Order < b.Order
+	end)
+
+	for index, entry in ipairs(items) do
+		local definition = ResourceConfig.Items[entry.Name]
+
+		local button = create("TextButton", {
+			Name = entry.Name,
+			Size = UDim2.new(1, -4, 0, 42),
+			BackgroundColor3 = Color3.fromRGB(42, 52, 62),
+			Text = (definition.Emoji or "??")
+				.. "  " .. definition.DisplayName
+				.. "     x" .. entry.Amount,
+			TextColor3 = Color3.new(1, 1, 1),
+			TextSize = 12,
+			Font = Enum.Font.GothamMedium,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			AutoButtonColor = false,
+			LayoutOrder = index,
+		}, list)
+
+		corner(button, 8)
+
+		create("UIPadding", {
+			PaddingLeft = UDim.new(0, 10),
+		}, button)
+
+		button.MouseButton1Click:Connect(function()
+			selectItem(entry.Name)
+		end)
+
+		itemButtons[entry.Name] = button
+	end
+
+	local maxCapacity = ResourceConfig.Inventory.BaseCapacity or 100
+	capacity.Text = "?? Capacidade: " .. used .. " / " .. maxCapacity
+
+	capacity.TextColor3 = used >= maxCapacity
+		and Color3.fromRGB(255, 110, 110)
+		or Color3.fromRGB(180, 220, 190)
+
+	if selectedItem and (inventory[selectedItem] or 0) > 0 then
+		selectItem(selectedItem)
+	else
+		selectItem(nil)
+	end
+end
+
+dropButton.MouseButton1Click:Connect(function()
+	if selectedItem then
+		inventoryRemote:FireServer("Drop", selectedItem)
 	end
 end)
 
--- Pede o inventário (o servidor pode ter enviado antes desta tela existir)
-InventoryRemote:FireServer("Request")
-task.delay(3, function()
-	if not receivedInventory then
-		InventoryRemote:FireServer("Request")
+trashButton.MouseButton1Click:Connect(function()
+	if selectedItem then
+		inventoryRemote:FireServer("Trash", selectedItem)
 	end
 end)
 
--- ===========================================================================
--- MENSAGENS DO SERVIDOR (coleta)
--- ===========================================================================
+local function setOpen(open)
+	if open then
+		main.Visible = true
+		main.Size = UDim2.fromOffset(545, 410)
 
-CollectRemote.OnClientEvent:Connect(function(action, payload)
-	if action == "Start" and type(payload) == "table" then
-		showBar(tostring(payload.Label or "Coletando..."), tonumber(payload.Duration) or 1)
+		tween(main, {
+			Size = UDim2.fromOffset(570, 430),
+		}, 0.2)
 
-	elseif action == "Done" and type(payload) == "table" then
-		hideBar()
-		for _, reward in ipairs(payload) do
-			showToast(string.format("+%d %s", reward.Amount, reward.Name), Color3.fromRGB(140, 230, 140))
+		toggle.Text = "?  FECHAR"
+		inventoryRemote:FireServer("Request")
+		upgradeRequest:FireServer("Request")
+	else
+		toggle.Text = "??  MOCHILA"
+
+		tween(main, {
+			Size = UDim2.fromOffset(545, 410),
+		}, 0.15)
+
+		task.delay(0.15, function()
+			if main and main.Parent then
+				main.Visible = false
+			end
+		end)
+	end
+end
+
+toggle.MouseButton1Click:Connect(function()
+	setOpen(not main.Visible)
+end)
+
+close.MouseButton1Click:Connect(function()
+	setOpen(false)
+end)
+
+inventoryRemote.OnClientEvent:Connect(function(data)
+	if type(data) ~= "table" then
+		return
+	end
+
+	inventory = data.Items or data
+	updateInventory()
+end)
+
+upgradeUpdate.OnClientEvent:Connect(function(action, first, second)
+	if action == "State" and type(first) == "table" then
+		tools = first
+		updateTools()
+
+	elseif action == "Result" then
+		local success = first
+		local message = second
+
+		if message then
+			warn("[Mochila] " .. tostring(message))
 		end
 
-	elseif action == "Cancel" then
-		hideBar()
-		showToast(tostring(payload), Color3.fromRGB(255, 190, 110))
-
-	elseif action == "Denied" then
-		showToast(tostring(payload), Color3.fromRGB(255, 190, 110))
+		if success then
+			inventoryRemote:FireServer("Request")
+		end
 	end
 end)
 
--- ===========================================================================
--- RECURSOS DE OUTRAS ILHAS: esconde o botão de coletar (só visual; o servidor valida de verdade)
--- ===========================================================================
+main.Visible = false
+updateInventory()
+updateTools()
 
-local function updatePrompt(prompt)
-	local islandIndex = prompt:GetAttribute("IslandIndex") or 0
-	local baseDistance = prompt:GetAttribute("BaseDistance") or 10
-	local ownIndex = player:GetAttribute("IslandIndex") or 0
-
-	if islandIndex > 0 and islandIndex ~= ownIndex then
-		prompt.MaxActivationDistance = 0
-	else
-		prompt.MaxActivationDistance = baseDistance
-	end
-end
-
-local function refreshAllPrompts()
-	for _, prompt in ipairs(CollectionService:GetTagged("ResourcePrompt")) do
-		updatePrompt(prompt)
-	end
-end
-
-CollectionService:GetInstanceAddedSignal("ResourcePrompt"):Connect(updatePrompt)
-player:GetAttributeChangedSignal("IslandIndex"):Connect(refreshAllPrompts)
-refreshAllPrompts()
+inventoryRemote:FireServer("Request")
+upgradeRequest:FireServer("Request")

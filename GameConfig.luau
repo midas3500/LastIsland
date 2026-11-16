@@ -26,13 +26,13 @@ GameConfig.ServiceLoadOrder = {
 	"IslandService",
 	"ResourceService",
 	"InventoryService",
+	"SurvivalService",
 	"ToolUpgradeService",
 	"BuildingService",
 	"EventService",
 	"QuestService",
 	"MonetizationService",
 }
-
 -- Remotes que o Main cria dentro de ReplicatedStorage > Remotes.
 GameConfig.Remotes = {
 	Events = {
@@ -42,8 +42,8 @@ GameConfig.Remotes = {
 		"ToolUpgradeRequest",
 		"ToolUpgradeUpdate",
 		"EventNotification",
-		"ToolUpgradeRequest",
-		"ToolUpgradeUpdate",
+		"SprintRequest",
+		"FoodRequest",
 	},
 	Functions = {}, -- RemoteFunctions futuras
 }
@@ -86,6 +86,7 @@ GameConfig.Data = {
 -- Perfil de um jogador novo. Para adicionar campos no futuro, basta incluí-los aqui:
 -- jogadores antigos recebem os campos novos automaticamente ("reconcile").
 GameConfig.DefaultProfile = {
+	
 	SchemaVersion = GameConfig.Data.SchemaVersion,
 	CreatedAt = 0,
 	Coins = 0,
@@ -95,7 +96,10 @@ GameConfig.DefaultProfile = {
 	Quests = { Active = {}, Completed = {} },
 	Purchases = { Gamepasses = {} },        -- registro de compras (Etapa 8)
 	Stats = { Joins = 0, PlayTime = 0 },
-	Island = { PreferredSlot = 0 },         -- ilha preferida (Etapa 2)
+	Island = { PreferredSlot = 0 }, 
+	Survival = {
+		Hunger = 100,
+	},-- ilha preferida (Etapa 2)
 
 }
 
