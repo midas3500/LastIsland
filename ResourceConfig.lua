@@ -29,12 +29,6 @@ ResourceConfig.Gathering = {
 
 -- Itens que existem no inventário
 ResourceConfig.Items = {
-	Coconut = {
-		DisplayName = "Coco",
-		MaxStack = 999,
-		Order = 6,
-		Color = Color3.fromRGB(150, 110, 65),
-	},
 	Wood    = { DisplayName = "Madeira",          MaxStack = 999, Order = 1, Color = Color3.fromRGB(176, 128, 78) },
 	Stone   = { DisplayName = "Pedra",            MaxStack = 999, Order = 2, Color = Color3.fromRGB(140, 145, 155) },
 	Fiber   = { DisplayName = "Fibra",            MaxStack = 999, Order = 3, Color = Color3.fromRGB(120, 180, 90) },
@@ -101,7 +95,6 @@ ResourceConfig.Nodes = {
 		Rewards = {
 			{ Item = "Wood", Min = 3, Max = 5 },
 			{ Item = "Fiber", Min = 1, Max = 2, Chance = 0.3 },
-			{ Item = "Coconut", Min = 1, Max = 2, Chance = 0.3 },
 		},
 		ShakeDegrees = 2.5, HitHeight = 3, PromptHeight = 2.5,
 		Particle = { Color = Color3.fromRGB(150, 105, 60), Count = 8, Size = 0.5, Speed = 9 },
@@ -144,22 +137,5 @@ ResourceConfig.Nodes = {
 		Particle = { Color = Color3.fromRGB(100, 170, 80), Count = 6, Size = 0.4, Speed = 7 },
 	},
 }
-
-ResourceConfig.Inventory = {
-	BaseCapacity = 100,
-}
-
-ResourceConfig.ToolUpgradeCosts = {
-	Axe = {
-		[2] = { Wood = 30, Stone = 20, IronOre = 10 },
-		[3] = { Wood = 60, Stone = 40, IronOre = 25, GoldOre = 5 },
-	},
-
-	Pickaxe = {
-		[2] = { Wood = 25, Stone = 30, IronOre = 15 },
-		[3] = { Wood = 50, Stone = 50, IronOre = 30, GoldOre = 8 },
-	},
-}
-
 
 return ResourceConfig
