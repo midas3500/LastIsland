@@ -30,10 +30,12 @@ local function sendState(player, updateRemote)
 end
 
 local function upgrade(player, toolName, updateRemote)
-	if toolName ~= "Axe" and toolName ~= "Pickaxe" then
+	if type(toolName) ~= "string"
+		or not ResourceConfig.Tools[toolName]
+		or not ResourceConfig.ToolUpgradeCosts[toolName] then
+
 		return false, "Ferramenta inválida."
 	end
-
 	if not PlayerDataService.IsLoaded(player) then
 		return false, "Seus dados ainda estão carregando."
 	end

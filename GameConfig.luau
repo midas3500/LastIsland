@@ -24,10 +24,10 @@ GameConfig.ServiceLoadOrder = {
 	"LightingService",
 	"MapService",
 	"IslandService",
-	"ResourceService",
 	"InventoryService",
-	"SurvivalService",
 	"ToolUpgradeService",
+	"ResourceService",
+	"SurvivalService",
 	"BuildingService",
 	"EventService",
 	"QuestService",
@@ -91,7 +91,12 @@ GameConfig.DefaultProfile = {
 	CreatedAt = 0,
 	Coins = 0,
 	Inventory = {},                         -- ex.: { Wood = 10, Stone = 3 } (Etapa 3)
-	Tools = { Axe = 1, Pickaxe = 1 },       -- tier atual de cada ferramenta (Etapa 5)
+	Tools = {
+		Axe = 1,
+		Pickaxe = 1,
+		Knife = 1,
+		FishingRod = 1,
+	},
 	Buildings = {},                         -- construções salvas (Etapa 4)
 	Quests = { Active = {}, Completed = {} },
 	Purchases = { Gamepasses = {} },        -- registro de compras (Etapa 8)
@@ -99,6 +104,7 @@ GameConfig.DefaultProfile = {
 	Island = { PreferredSlot = 0 }, 
 	Survival = {
 		Hunger = 100,
+		AquaticProtection = 1,
 	},-- ilha preferida (Etapa 2)
 
 }

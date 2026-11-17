@@ -1,8 +1,8 @@
 
 --[[
-    InventoryService v3
-    Mochila, descarte e itens físicos no mundo.
-    Servidor controla todas as operações.
+    InventoryService v4
+    Mochila com descarte e drop por quantidade.
+    O servidor valida todas as operações.
 ]]
 
 local Players = game:GetService("Players")
@@ -22,10 +22,9 @@ local lastRequest = {}
 local lastAction = {}
 
 local DROP_LIFETIME = 120
-local ACTION_COOLDOWN = 0.35
+local ACTION_COOLDOWN = 0.25
 local LABEL_DISTANCE = 18
 local PICKUP_DISTANCE = 10
-
 local DROP_FOLDER_NAME = "WorldDrops"
 
 local function getDropFolder()
@@ -76,42 +75,17 @@ local function snapshot(inventory)
 	return copy
 end
 
-local function flush(player)
-	dirty[player] = nil
-
-	if not remote or not player.Parent then
-		return
-	end
-
-	local inventory = inventoryOf(player)
-
-	if inventory then
-		remote:FireClient(player, {
-			Items = snapshot(inventory),
-			Capacity = InventoryService.GetCapacity(),
-		})
-	end
-end
-
-local function markDirty(player)
-	if dirty[player] then
-		return
-	end
-
-	dirty[player] = true
-	task.defer(flush, player)
-end
-
 local function getCapacity()
 	return ResourceConfig.Inventory.BaseCapacity or 100
 end
 
+function InventoryService.GetCapacity()
+	return getCapacity()
+end
+
 function InventoryService.GetUsedCapacity(player)
 	local inventory = inventoryOf(player)
-
-	if not inventory then
-		return 0
-	end
+	if not inventory then return 0 end
 
 	local used = 0
 
@@ -124,23 +98,13 @@ function InventoryService.GetUsedCapacity(player)
 	return used
 end
 
-function InventoryService.GetCapacity()
-	return getCapacity()
-end
-
 function InventoryService.GetFreeCapacity(player)
-	return math.max(
-		0,
-		getCapacity() - InventoryService.GetUsedCapacity(player)
-	)
+	return math.max(0, getCapacity() - InventoryService.GetUsedCapacity(player))
 end
 
 function InventoryService.GetCount(player, item)
 	local inventory = inventoryOf(player)
-
-	if not inventory then
-		return 0
-	end
+	if not inventory then return 0 end
 
 	local amount = inventory[item]
 	return type(amount) == "number" and amount or 0
@@ -150,17 +114,12 @@ function InventoryService.GetRoom(player, item)
 	local inventory = inventoryOf(player)
 	local definition = ResourceConfig.Items[item]
 
-	if not inventory or not definition then
-		return 0
-	end
+	if not inventory or not definition then return 0 end
 
 	local current = inventory[item] or 0
 	local stackRoom = math.max(0, (definition.MaxStack or 999) - current)
 
-	return math.min(
-		stackRoom,
-		InventoryService.GetFreeCapacity(player)
-	)
+	return math.min(stackRoom, InventoryService.GetFreeCapacity(player))
 end
 
 function InventoryService.CanAdd(player, item, amount)
@@ -171,25 +130,38 @@ function InventoryService.CanAdd(player, item, amount)
 	return InventoryService.GetRoom(player, item) >= (amount or 1)
 end
 
+local function flush(player)
+	dirty[player] = nil
+
+	if not remote or not player.Parent then return end
+
+	local inventory = inventoryOf(player)
+
+	if inventory then
+		remote:FireClient(player, {
+			Items = snapshot(inventory),
+			Capacity = getCapacity(),
+		})
+	end
+end
+
+local function markDirty(player)
+	if dirty[player] then return end
+
+	dirty[player] = true
+	task.defer(flush, player)
+end
+
 function InventoryService.AddItem(player, item, amount, reason)
 	if not ResourceConfig.Items[item] or not validAmount(amount) then
 		return 0
 	end
 
 	local inventory = inventoryOf(player)
+	if not inventory then return 0 end
 
-	if not inventory then
-		return 0
-	end
-
-	local added = math.min(
-		amount,
-		InventoryService.GetRoom(player, item)
-	)
-
-	if added <= 0 then
-		return 0
-	end
+	local added = math.min(amount, InventoryService.GetRoom(player, item))
+	if added <= 0 then return 0 end
 
 	inventory[item] = InventoryService.GetCount(player, item) + added
 	markDirty(player)
@@ -203,16 +175,10 @@ function InventoryService.RemoveItem(player, item, amount, reason)
 	end
 
 	local inventory = inventoryOf(player)
-
-	if not inventory then
-		return false
-	end
+	if not inventory then return false end
 
 	local current = InventoryService.GetCount(player, item)
-
-	if current < amount then
-		return false
-	end
+	if current < amount then return false end
 
 	inventory[item] = current - amount
 
@@ -225,9 +191,7 @@ function InventoryService.RemoveItem(player, item, amount, reason)
 end
 
 function InventoryService.HasItems(player, cost)
-	if type(cost) ~= "table" then
-		return false
-	end
+	if type(cost) ~= "table" then return false end
 
 	for item, amount in pairs(cost) do
 		if not ResourceConfig.Items[item]
@@ -256,7 +220,7 @@ function InventoryService.Sync(player)
 	markDirty(player)
 end
 
--- VISUAL DOS RECURSOS DROPPADOS
+-- VISUAL DOS PACOTES DROPPADOS
 
 local DROP_STYLES = {
 	Wood = {
@@ -302,19 +266,13 @@ local DROP_STYLES = {
 	},
 }
 
-local function createDrop(player, item)
+local function createDrop(player, item, amount)
 	local definition = ResourceConfig.Items[item]
-
-	if not definition then
-		return false
-	end
+	if not definition then return false end
 
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
-
-	if not root then
-		return false
-	end
+	if not root then return false end
 
 	local style = DROP_STYLES[item] or {
 		Shape = Enum.PartType.Block,
@@ -331,52 +289,47 @@ local function createDrop(player, item)
 	drop.Color = style.Color
 	drop.Anchored = false
 	drop.CanCollide = true
-	drop.TopSurface = Enum.SurfaceType.Smooth
-	drop.BottomSurface = Enum.SurfaceType.Smooth
 	drop.Position = root.Position
 		+ root.CFrame.LookVector * 3
 		+ Vector3.new(0, 2, 0)
-
 	drop.Parent = getDropFolder()
 
 	drop:SetAttribute("ItemName", item)
+	drop:SetAttribute("Amount", amount)
 	drop:SetAttribute("OwnerUserId", player.UserId)
 
-	-- Nome visível somente de perto.
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "ItemLabel"
 	billboard.Adornee = drop
-	billboard.Size = UDim2.fromOffset(160, 38)
+	billboard.Size = UDim2.fromOffset(180, 46)
 	billboard.StudsOffset = Vector3.new(0, 1.3, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = LABEL_DISTANCE
-	billboard.Enabled = true
 	billboard.Parent = drop
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundColor3 = Color3.fromRGB(22, 29, 35)
-	label.BackgroundTransparency = 0.15
-	label.Text = string.upper(definition.DisplayName or item)
+	label.BackgroundTransparency = 0.1
+	label.Text = (definition.DisplayName or item) .. " x" .. amount
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 0.7
 	label.TextScaled = true
 	label.Font = Enum.Font.GothamBold
 	label.Parent = billboard
 
-	local labelCorner = Instance.new("UICorner")
-	labelCorner.CornerRadius = UDim.new(0, 8)
-	labelCorner.Parent = label
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = label
 
-	local labelStroke = Instance.new("UIStroke")
-	labelStroke.Color = style.Color
-	labelStroke.Thickness = 1.5
-	labelStroke.Transparency = 0.1
-	labelStroke.Parent = label
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = style.Color
+	stroke.Thickness = 1.5
+	stroke.Parent = label
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PickupPrompt"
-	prompt.ActionText = "Recolher"
+	prompt.ActionText = "Recolher x" .. amount
 	prompt.ObjectText = definition.DisplayName or item
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.HoldDuration = 0.15
@@ -387,76 +340,73 @@ local function createDrop(player, item)
 	local claimed = false
 
 	prompt.Triggered:Connect(function(otherPlayer)
-		if claimed or not drop.Parent then
+		if claimed or not drop.Parent then return end
+		if not otherPlayer or not otherPlayer:IsA("Player") then return end
+		if not PlayerDataService.IsLoaded(otherPlayer) then return end
+
+		local available = drop:GetAttribute("Amount")
+		if not validAmount(available) then
+			drop:Destroy()
 			return
 		end
 
-		if not otherPlayer or not otherPlayer:IsA("Player") then
-			return
-		end
+		local room = InventoryService.GetRoom(otherPlayer, item)
+		if room <= 0 then return end
 
-		if not PlayerDataService.IsLoaded(otherPlayer) then
-			return
-		end
-
-		if not InventoryService.CanAdd(otherPlayer, item, 1) then
-			return
-		end
-
+		local toGive = math.min(available, room)
 		claimed = true
 
 		local added = InventoryService.AddItem(
 			otherPlayer,
 			item,
-			1,
+			toGive,
 			"WorldPickup"
 		)
 
 		if added > 0 then
-			drop:Destroy()
+			local remaining = available - added
+
+			if remaining <= 0 then
+				drop:Destroy()
+			else
+				drop:SetAttribute("Amount", remaining)
+				prompt.ActionText = "Recolher x" .. remaining
+				label.Text = (definition.DisplayName or item) .. " x" .. remaining
+				claimed = false
+			end
 		else
 			claimed = false
 		end
 	end)
 
 	Debris:AddItem(drop, DROP_LIFETIME)
-
 	return true
 end
 
-local function handleAction(player, action, item)
-	if type(action) ~= "string" or type(item) ~= "string" then
-		return
-	end
+local function handleAction(player, action, item, amount)
+	if type(action) ~= "string" or type(item) ~= "string" then return end
+	if not ResourceConfig.Items[item] then return end
+	if not PlayerDataService.IsLoaded(player) then return end
 
-	if not ResourceConfig.Items[item] then
-		return
-	end
-
-	if not PlayerDataService.IsLoaded(player) then
-		return
-	end
+	if not validAmount(amount) then return end
 
 	local now = os.clock()
-
-	if lastAction[player]
-		and now - lastAction[player] < ACTION_COOLDOWN then
+	if lastAction[player] and now - lastAction[player] < ACTION_COOLDOWN then
 		return
 	end
-
 	lastAction[player] = now
 
-	if InventoryService.GetCount(player, item) < 1 then
-		return
-	end
+	local owned = InventoryService.GetCount(player, item)
+	if owned < amount then return end
 
 	if action == "Drop" then
-		if createDrop(player, item) then
-			InventoryService.RemoveItem(player, item, 1, "Drop")
+		-- Só remove do inventário depois que o pacote foi criado.
+		if createDrop(player, item, amount) then
+			InventoryService.RemoveItem(player, item, amount, "Drop")
 		end
 
 	elseif action == "Trash" then
-		InventoryService.RemoveItem(player, item, 1, "Trash")
+		InventoryService.RemoveItem(player, item, amount, "Trash")
 	end
 end
 
@@ -468,12 +418,11 @@ function InventoryService.Start()
 		:WaitForChild("Remotes")
 		:WaitForChild("UpdateInventory")
 
-	remote.OnServerEvent:Connect(function(player, action, item)
+	remote.OnServerEvent:Connect(function(player, action, item, amount)
 		if action == "Request" then
 			local now = os.clock()
 
-			if lastRequest[player]
-				and now - lastRequest[player] < 1 then
+			if lastRequest[player] and now - lastRequest[player] < 1 then
 				return
 			end
 
@@ -484,7 +433,7 @@ function InventoryService.Start()
 			end
 
 		elseif action == "Drop" or action == "Trash" then
-			handleAction(player, action, item)
+			handleAction(player, action, item, amount)
 		end
 	end)
 
@@ -498,7 +447,7 @@ function InventoryService.Start()
 		lastAction[player] = nil
 	end)
 
-	print("[InventoryService] Inventário v3 iniciado.")
+	print("[InventoryService] Inventário v4 iniciado.")
 end
 
 return InventoryService
