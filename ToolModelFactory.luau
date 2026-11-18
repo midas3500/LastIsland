@@ -5,7 +5,7 @@
 
     Cria os modelos de:
     Machado, Picareta, Faca e Vara de Pesca.
-    Suporta os nÌveis Pedra, Ferro e Ouro.
+    Suporta os n√≠veis Pedra, Ferro e Ouro.
 ]]
 
 local ResourceConfig = require(script.Parent:WaitForChild("ResourceConfig"))
@@ -26,11 +26,11 @@ local function getToolDefinition(toolName, tier)
 	local definition = ResourceConfig.Tools[toolName]
 
 	assert(definition, "Ferramenta inexistente: " .. tostring(toolName))
-	assert(definition.Tiers, "Tiers n„o encontrados: " .. tostring(toolName))
+	assert(definition.Tiers, "Tiers n√£o encontrados: " .. tostring(toolName))
 
 	local tierData = definition.Tiers[tier]
 
-	assert(tierData, "NÌvel de ferramenta inexistente: " .. tostring(tier))
+	assert(tierData, "N√≠vel de ferramenta inexistente: " .. tostring(tier))
 
 	return definition, tierData
 end
@@ -252,7 +252,7 @@ local function createFishingRod(tool, handle, color, material, length)
 	)
 end
 
--- FUN«√O PRINCIPAL
+-- FUN√á√ÉO PRINCIPAL
 
 function ToolModelFactory.CreateTool(toolName, tier)
 	tier = math.max(1, math.floor(tonumber(tier) or 1))
@@ -297,10 +297,10 @@ function ToolModelFactory.CreateTool(toolName, tier)
 
 	else
 		tool:Destroy()
-		error("Tipo de ferramenta n„o implementado: " .. tostring(toolName))
+		error("Tipo de ferramenta n√£o implementado: " .. tostring(toolName))
 	end
 
-	-- Ajuste b·sico de posiÁ„o na m„o.
+	-- Ajuste b√°sico de posi√ß√£o na m√£o.
 	if visualConfig and typeof(visualConfig.GripPos) == "Vector3" then
 		tool.GripPos = visualConfig.GripPos
 	else

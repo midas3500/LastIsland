@@ -4,16 +4,16 @@
 
 	Salvamento seguro de dados dos jogadores.
 
-	ProteÁıes:
-	- UpdateAsync (nunca sobrescreve ‡s cegas) + retry com espera crescente
-	- Trava de sess„o (o mesmo jogador n„o abre o perfil em 2 servidores)
-	- Se o carregamento FALHAR, o jogador n„o joga com perfil vazio que depois sobrescreveria
-	  o perfil real: ele È expulso (padr„o) ou fica em modo seguro sem salvar
-	- Dados de vers„o MAIS NOVA que o servidor entende viram somente-leitura
-	- Salvamento autom·tico, ao sair e em BindToClose (desligamento do servidor)
-	- Fora do ar/sem permiss„o no Studio: usa memÛria (mock) e avisa
+	Prote√ß√µes:
+	- UpdateAsync (nunca sobrescreve √†s cegas) + retry com espera crescente
+	- Trava de sess√£o (o mesmo jogador n√£o abre o perfil em 2 servidores)
+	- Se o carregamento FALHAR, o jogador n√£o joga com perfil vazio que depois sobrescreveria
+	  o perfil real: ele √© expulso (padr√£o) ou fica em modo seguro sem salvar
+	- Dados de vers√£o MAIS NOVA que o servidor entende viram somente-leitura
+	- Salvamento autom√°tico, ao sair e em BindToClose (desligamento do servidor)
+	- Fora do ar/sem permiss√£o no Studio: usa mem√≥ria (mock) e avisa
 
-	USO POR OUTROS SERVI«OS:
+	USO POR OUTROS SERVI√áOS:
 		local data = PlayerDataService.GetData(player) -- tabela viva do perfil ou nil
 		data.Coins += 10                                -- altere direto; o autosave grava
 		PlayerDataService.Save(player, false)           -- (opcional) salvar agora
@@ -33,14 +33,14 @@ local PlayerDataService = {}
 
 local SERVER_ID = (game.JobId ~= "") and game.JobId or "studio"
 
-local sessions = {}            -- [Player] = sess„o
+local sessions = {}            -- [Player] = sess√£o
 local store = nil              -- DataStore real ou mock
 local usingMock = false
 local shuttingDown = false
 local loadedCallbacks = {}
 local leavingCallbacks = {}
 
--- Utilit·rios ------------------------------------------------------------
+-- Utilit√°rios ------------------------------------------------------------
 
 local function log(...)
 	if GameConfig.Debug then
@@ -74,7 +74,7 @@ local function reconcile(target, template)
 	end
 end
 
--- MigraÁıes: Migrations[N] converte dados da vers„o N para a N+1.
+-- Migra√ß√µes: Migrations[N] converte dados da vers√£o N para a N+1.
 -- Exemplo futuro (quando SchemaVersion virar 2):
 --   Migrations[1] = function(data) data.Coins = data.Gold or 0 end
 local Migrations = {}
@@ -83,7 +83,7 @@ local function dataKey(userId)
 	return "Player_" .. tostring(userId)
 end
 
--- DataStore falso, em memÛria (sÛ para testes quando o real n„o est· disponÌvel)
+-- DataStore falso, em mem√≥ria (s√≥ para testes quando o real n√£o est√° dispon√≠vel)
 local MockStore = {}
 MockStore.__index = MockStore
 
@@ -111,7 +111,7 @@ local function storeUpdate(key, transform)
 	return store:UpdateAsync(key, transform)
 end
 
--- Tenta uma operaÁ„o v·rias vezes, esperando cada vez mais entre as tentativas
+-- Tenta uma opera√ß√£o v√°rias vezes, esperando cada vez mais entre as tentativas
 local function withRetry(label, fn)
 	local lastError
 	for attempt = 1, Cfg.MaxRetries do
@@ -165,12 +165,12 @@ local function loadProfile(userId)
 			storeUpdate(key, function(old)
 				if isLockedByOther(old) then
 					lockedBy = old.Meta.JobId
-					return nil -- cancela: n„o altera nada
+					return nil -- cancela: n√£o altera nada
 				end
 				old = old or {}
 				if old.Data ~= nil and type(old.Data) ~= "table" then
 					corrupt = true
-					return nil -- dado estranho: n„o mexe
+					return nil -- dado estranho: n√£o mexe
 				end
 				capturedData = deepCopy(old.Data)
 				old.Meta = { JobId = SERVER_ID, Time = os.time() }
@@ -179,10 +179,10 @@ local function loadProfile(userId)
 		end)
 
 		if not ok then
-			return false, "DataStore indisponÌvel: " .. tostring(err)
+			return false, "DataStore indispon√≠vel: " .. tostring(err)
 		end
 		if corrupt then
-			return false, "Perfil com formato inesperado (preservado sem alteraÁıes)"
+			return false, "Perfil com formato inesperado (preservado sem altera√ß√µes)"
 		end
 		if lockedBy then
 			warnLog(string.format("Perfil %s em uso pelo servidor %s. Aguardando...", key, tostring(lockedBy)))
@@ -205,7 +205,7 @@ local function prepareData(data)
 	data.SchemaVersion = data.SchemaVersion or 1
 
 	if data.SchemaVersion > Cfg.SchemaVersion then
-		warnLog("Perfil de vers„o MAIS NOVA que este servidor. Modo somente-leitura.")
+		warnLog("Perfil de vers√£o MAIS NOVA que este servidor. Modo somente-leitura.")
 		return data, true
 	end
 
@@ -214,7 +214,7 @@ local function prepareData(data)
 		if migrate then
 			local ok, err = pcall(migrate, data)
 			if not ok then
-				warnLog("Falha na migraÁ„o:", tostring(err))
+				warnLog("Falha na migra√ß√£o:", tostring(err))
 				return data, true
 			end
 		end
@@ -247,7 +247,7 @@ local function saveSession(session, release)
 	end
 
 	if session.ReadOnly then
-		-- Nunca grava dados em modo seguro; sÛ devolve a trava, se tiver
+		-- Nunca grava dados em modo seguro; s√≥ devolve a trava, se tiver
 		if release then
 			if session.HasLock then
 				releaseLockOnly(session.UserId)
@@ -312,7 +312,7 @@ local function saveSession(session, release)
 		return true
 	end
 
-	warnLog(string.format("FALHA ao salvar %s. Dados ainda na memÛria: %s", key, tostring(err)))
+	warnLog(string.format("FALHA ao salvar %s. Dados ainda na mem√≥ria: %s", key, tostring(err)))
 	return false
 end
 
@@ -339,7 +339,7 @@ local function onPlayerAdded(player)
 	local success, result = loadProfile(player.UserId)
 
 	if not success then
-		warnLog(string.format("N„o foi possÌvel carregar dados de %s: %s", player.Name, tostring(result)))
+		warnLog(string.format("N√£o foi poss√≠vel carregar dados de %s: %s", player.Name, tostring(result)))
 
 		if session.Abandoned or player.Parent == nil then
 			sessions[player] = nil
@@ -352,14 +352,14 @@ local function onPlayerAdded(player)
 			return
 		end
 
-		-- Modo seguro: joga com perfil tempor·rio que NUNCA ser· salvo
+		-- Modo seguro: joga com perfil tempor√°rio que NUNCA ser√° salvo
 		session.Data = deepCopy(GameConfig.DefaultProfile)
 		session.ReadOnly = true
 		session.Loaded = true
 		session.ClockMark = os.clock()
 		player:SetAttribute("DataLoaded", true)
 		player:SetAttribute("DataReadOnly", true)
-		warnLog(string.format("%s est· em MODO SEGURO: nada ser· salvo nesta sess„o.", player.Name))
+		warnLog(string.format("%s est√° em MODO SEGURO: nada ser√° salvo nesta sess√£o.", player.Name))
 		fire(loadedCallbacks, player, session.Data)
 		return
 	end
@@ -409,7 +409,7 @@ local function onPlayerRemoving(player)
 
 	local saved = saveSession(session, true)
 	if not saved and not session.ReadOnly then
-		warnLog(string.format("ATEN«√O: dados de %s podem n„o ter sido salvos.", player.Name))
+		warnLog(string.format("ATEN√á√ÉO: dados de %s podem n√£o ter sido salvos.", player.Name))
 	end
 
 	sessions[player] = nil
@@ -438,7 +438,7 @@ local function autosaveLoop()
 	end
 end
 
--- API p˙blica ------------------------------------------------------------------
+-- API p√∫blica ------------------------------------------------------------------
 
 function PlayerDataService.GetData(player)
 	local session = sessions[player]
@@ -458,7 +458,7 @@ function PlayerDataService.IsReadOnly(player)
 	return session ~= nil and session.ReadOnly
 end
 
--- Espera os dados carregarem (use com moderaÁ„o). Retorna a tabela ou nil.
+-- Espera os dados carregarem (use com modera√ß√£o). Retorna a tabela ou nil.
 function PlayerDataService.WaitForData(player, timeout)
 	local limit = os.clock() + (timeout or 30)
 	while player.Parent ~= nil and os.clock() < limit do
@@ -479,7 +479,7 @@ function PlayerDataService.Save(player, release)
 	return saveSession(session, release == true)
 end
 
--- Chamado quando os dados de um jogador ficam prontos (inclusive para quem j· estava carregado)
+-- Chamado quando os dados de um jogador ficam prontos (inclusive para quem j√° estava carregado)
 function PlayerDataService.OnLoaded(callback)
 	table.insert(loadedCallbacks, callback)
 	for player, session in pairs(sessions) do
@@ -489,7 +489,7 @@ function PlayerDataService.OnLoaded(callback)
 	end
 end
 
--- Chamado logo ANTES do salvamento final de um jogador que est· saindo
+-- Chamado logo ANTES do salvamento final de um jogador que est√° saindo
 function PlayerDataService.OnLeaving(callback)
 	table.insert(leavingCallbacks, callback)
 end
@@ -502,23 +502,23 @@ function PlayerDataService.Init()
 	if Cfg.ForceMockStore then
 		store = MockStore.new()
 		usingMock = true
-		warnLog("ForceMockStore ativo: usando memÛria. NADA ser· salvo de verdade.")
+		warnLog("ForceMockStore ativo: usando mem√≥ria. NADA ser√° salvo de verdade.")
 		return
 	end
 
 	local realStore = DataStoreService:GetDataStore(storeName)
 
 	if RunService:IsStudio() then
-		-- Testa se o Studio tem permiss„o para usar DataStore
+		-- Testa se o Studio tem permiss√£o para usar DataStore
 		local ok, err = pcall(function()
 			return realStore:GetAsync("__probe")
 		end)
 		if not ok then
 			store = MockStore.new()
 			usingMock = true
-			warnLog("DataStore real indisponÌvel no Studio: " .. tostring(err))
-			warnLog("Usando memÛria (mock): os dados valem sÛ atÈ vocÍ apertar Stop.")
-			warnLog("Para testar salvamento de verdade, siga a seÁ„o 4 do guia.")
+			warnLog("DataStore real indispon√≠vel no Studio: " .. tostring(err))
+			warnLog("Usando mem√≥ria (mock): os dados valem s√≥ at√© voc√™ apertar Stop.")
+			warnLog("Para testar salvamento de verdade, siga a se√ß√£o 4 do guia.")
 			return
 		end
 	end

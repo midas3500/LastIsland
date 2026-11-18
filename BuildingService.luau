@@ -1,4 +1,4 @@
--- BuildingService: construção validada no servidor (Etapa 4)
+-- BuildingService: construÃ§Ã£o validada no servidor (Etapa 4)
 local BuildingService = {}
 
 function BuildingService.Init()

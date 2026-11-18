@@ -2,7 +2,7 @@
 --[[
     InventoryService v4
     Mochila com descarte e drop por quantidade.
-    O servidor valida todas as operações.
+    O servidor valida todas as operaÃ§Ãµes.
 ]]
 
 local Players = game:GetService("Players")
@@ -75,12 +75,16 @@ local function snapshot(inventory)
 	return copy
 end
 
-local function getCapacity()
+local function getCapacity(player)
+	if InventoryService.CapacityProvider and player then
+		local ok, value = pcall(InventoryService.CapacityProvider, player)
+		if ok and type(value) == "number" then return value end
+	end
 	return ResourceConfig.Inventory.BaseCapacity or 100
 end
 
-function InventoryService.GetCapacity()
-	return getCapacity()
+function InventoryService.GetCapacity(player)
+	return getCapacity(player)
 end
 
 function InventoryService.GetUsedCapacity(player)
@@ -400,7 +404,7 @@ local function handleAction(player, action, item, amount)
 	if owned < amount then return end
 
 	if action == "Drop" then
-		-- Só remove do inventário depois que o pacote foi criado.
+		-- SÃ³ remove do inventÃ¡rio depois que o pacote foi criado.
 		if createDrop(player, item, amount) then
 			InventoryService.RemoveItem(player, item, amount, "Drop")
 		end
@@ -447,7 +451,7 @@ function InventoryService.Start()
 		lastAction[player] = nil
 	end)
 
-	print("[InventoryService] Inventário v4 iniciado.")
+	print("[InventoryService] InventÃ¡rio v4 iniciado.")
 end
 
 return InventoryService

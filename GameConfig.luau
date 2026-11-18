@@ -2,8 +2,8 @@
 	GameConfig
 	Local: ReplicatedStorage > Modules > GameConfig
 
-	ConfiguraÁ„o central do jogo. Para mudar balanceamento, limites ou nomes,
-	altere AQUI em vez de procurar n˙meros espalhados pelos scripts.
+	Configura√ß√£o central do jogo. Para mudar balanceamento, limites ou nomes,
+	altere AQUI em vez de procurar n√∫meros espalhados pelos scripts.
 ]]
 
 local GameConfig = {}
@@ -15,16 +15,19 @@ GameConfig.Version = "0.1.0"
 GameConfig.Debug = true
 
 GameConfig.Server = {
-	MaxPlayers = 12, -- informativo. O valor real È definido em Game Settings > Places
+	MaxPlayers = 12, -- informativo. O valor real √© definido em Game Settings > Places
 }
 
--- Ordem em que o Main carrega os serviÁos (Init de todos, depois Start de todos).
+-- Ordem em que o Main carrega os servi√ßos (Init de todos, depois Start de todos).
 GameConfig.ServiceLoadOrder = {
 	"PlayerDataService",
+	"InventoryService",
+	"BackpackService",
 	"LightingService",
 	"MapService",
+	"IslandGenerator",
 	"IslandService",
-	"InventoryService",
+	"PrepService",
 	"ToolUpgradeService",
 	"ResourceService",
 	"SurvivalService",
@@ -32,6 +35,7 @@ GameConfig.ServiceLoadOrder = {
 	"EventService",
 	"QuestService",
 	"MonetizationService",
+	"IslandEvents"
 }
 -- Remotes que o Main cria dentro de ReplicatedStorage > Remotes.
 GameConfig.Remotes = {
@@ -61,29 +65,29 @@ GameConfig.Data = {
 	StoreName = "LastIsland_PlayerData",
 	-- Para "zerar" todos os dados durante os testes, troque "v1" por "v2" (cria um banco novo).
 	StoreVersion = "v1",
-	-- Aumente quando mudar a ESTRUTURA do perfil e escreva uma migraÁ„o no PlayerDataService.
+	-- Aumente quando mudar a ESTRUTURA do perfil e escreva uma migra√ß√£o no PlayerDataService.
 	SchemaVersion = 1,
 
-	AutoSaveInterval = 120, -- segundos entre salvamentos autom·ticos
-	MaxRetries = 4,         -- tentativas por operaÁ„o do DataStore
+	AutoSaveInterval = 120, -- segundos entre salvamentos autom√°ticos
+	MaxRetries = 4,         -- tentativas por opera√ß√£o do DataStore
 	RetryBaseDelay = 1,     -- espera entre tentativas: 1s, 2s, 4s...
 
-	-- Trava de sess„o: impede o mesmo jogador de ter o perfil aberto em 2 servidores.
-	LockTimeout = 300,      -- apÛs 300s sem renovar, a trava È considerada abandonada
+	-- Trava de sess√£o: impede o mesmo jogador de ter o perfil aberto em 2 servidores.
+	LockTimeout = 300,      -- ap√≥s 300s sem renovar, a trava √© considerada abandonada
 	LockWaitAttempts = 5,   -- quantas vezes espera a trava ser liberada ao entrar
 	LockWaitDelay = 3,      -- segundos entre essas tentativas
 
-	-- Se o perfil n„o carregar: true = expulsa o jogador com mensagem (mais seguro).
-	-- false = joga em "modo seguro" (nada È salvo naquela sess„o).
+	-- Se o perfil n√£o carregar: true = expulsa o jogador com mensagem (mais seguro).
+	-- false = joga em "modo seguro" (nada √© salvo naquela sess√£o).
 	KickOnLoadFailure = true,
-	KickMessage = "N„o foi possÌvel carregar seus dados. Eles est„o seguros e N√O foram alterados. Tente entrar novamente em instantes.",
+	KickMessage = "N√£o foi poss√≠vel carregar seus dados. Eles est√£o seguros e N√ÉO foram alterados. Tente entrar novamente em instantes.",
 
-	-- Ferramentas de TESTE (deixe ambos false em produÁ„o)
-	ForceMockStore = false, -- true = usa memÛria em vez do DataStore real
-	SimulateFailure = false, -- true = finge que o DataStore est· fora do ar
+	-- Ferramentas de TESTE (deixe ambos false em produ√ß√£o)
+	ForceMockStore = false, -- true = usa mem√≥ria em vez do DataStore real
+	SimulateFailure = false, -- true = finge que o DataStore est√° fora do ar
 }
 
--- Perfil de um jogador novo. Para adicionar campos no futuro, basta incluÌ-los aqui:
+-- Perfil de um jogador novo. Para adicionar campos no futuro, basta inclu√≠-los aqui:
 -- jogadores antigos recebem os campos novos automaticamente ("reconcile").
 GameConfig.DefaultProfile = {
 	
@@ -97,7 +101,7 @@ GameConfig.DefaultProfile = {
 		Knife = 1,
 		FishingRod = 1,
 	},
-	Buildings = {},                         -- construÁıes salvas (Etapa 4)
+	Buildings = {},                         -- constru√ß√µes salvas (Etapa 4)
 	Quests = { Active = {}, Completed = {} },
 	Purchases = { Gamepasses = {} },        -- registro de compras (Etapa 8)
 	Stats = { Joins = 0, PlayTime = 0 },
@@ -109,9 +113,9 @@ GameConfig.DefaultProfile = {
 
 }
 
--- MonetizaÁ„o. Est· VAZIA de propÛsito: nenhum ID inventado.
--- Na Etapa 8 vocÍ cria os itens no site do Roblox (Creator Hub) e cola os IDs reais aqui.
--- Formato previsto (N√O descomente com IDs falsos):
+-- Monetiza√ß√£o. Est√° VAZIA de prop√≥sito: nenhum ID inventado.
+-- Na Etapa 8 voc√™ cria os itens no site do Roblox (Creator Hub) e cola os IDs reais aqui.
+-- Formato previsto (N√ÉO descomente com IDs falsos):
 --   Gamepasses = {
 --       VIP = { Id = SEU_ID_REAL, Name = "VIP" },
 --   },
@@ -127,7 +131,7 @@ GameConfig.Islands = {
 	SpawnOnIsland = true,
 	ReconnectGraceSeconds = 120,
 	MaxBuildHeight = 60,
-	FreeText = "DisponÌvel",
+	FreeText = "Dispon√≠vel",
 	OfflineSuffix = " (offline)",
 	TagFormat = "Ilha de %s",
 	TagHeight = 30,

@@ -2,13 +2,13 @@
 	MapService
 	Local: ServerScriptService > Services > MapService
 
-	Gera o mapa inteiro por cÛdigo (sem modelos externos):
+	Gera o mapa inteiro por c√≥digo (sem modelos externos):
 	oceano, ilha central, 12 ilhas de jogadores, lobby, ponte, palmeiras, pedras.
 
-	TÈcnica low poly: cada "ilha" È um prisma de N lados montado com N/2 blocos girados.
-	(Um polÌgono regular de lados pares = uni„o de ret‚ngulos que ligam lados opostos.)
+	T√©cnica low poly: cada "ilha" √© um prisma de N lados montado com N/2 blocos girados.
+	(Um pol√≠gono regular de lados pares = uni√£o de ret√¢ngulos que ligam lados opostos.)
 
-	API para outros serviÁos:
+	API para outros servi√ßos:
 		MapService.GetIslandSlots()  -> lista de slots {Index, Name, Model, Center, SpawnCFrame, Radius, BuildRadius, GroundY, Angle}
 		MapService.GetSlot(index)
 		MapService.IsReady()
@@ -33,7 +33,7 @@ local slots = {}
 local ready = false
 
 -- ===========================================================================
--- UTILIT¡RIOS
+-- UTILIT√ÅRIOS
 -- ===========================================================================
 
 local function log(...)
@@ -51,7 +51,7 @@ local function jitter(color)
 	)
 end
 
--- Cria uma Part com padrıes do jogo. Define as propriedades ANTES do Parent (mais eficiente).
+-- Cria uma Part com padr√µes do jogo. Define as propriedades ANTES do Parent (mais eficiente).
 local function newPart(props)
 	local part = Instance.new("Part")
 	part.Anchored = true
@@ -70,7 +70,7 @@ local function newPart(props)
 	return part
 end
 
--- Cilindro em pÈ. props.CFrame = centro | props.Height | props.Diameter
+-- Cilindro em p√©. props.CFrame = centro | props.Height | props.Diameter
 local function newCylinder(props)
 	local p = {
 		Shape = Enum.PartType.Cylinder,
@@ -92,7 +92,7 @@ local function newFolder(name, parent)
 	return folder
 end
 
--- Reaproveita a pasta se j· existir (limpando sÛ o que foi gerado antes)
+-- Reaproveita a pasta se j√° existir (limpando s√≥ o que foi gerado antes)
 local function getFolder(name, parent)
 	local folder = parent:FindFirstChild(name)
 	if not folder then
@@ -120,10 +120,10 @@ local function tierByName(tiers, name)
 			return tier
 		end
 	end
-	error("Tier n„o encontrado no MapConfig: " .. tostring(name))
+	error("Tier n√£o encontrado no MapConfig: " .. tostring(name))
 end
 
--- Raio do maior cÌrculo que cabe dentro do polÌgono (garantidamente coberto)
+-- Raio do maior c√≠rculo que cabe dentro do pol√≠gono (garantidamente coberto)
 local function apothemOf(radius)
 	return radius * math.cos(math.pi / Style.PrismSides)
 end
@@ -163,7 +163,7 @@ end
 -- FORMAS LOW POLY
 -- ===========================================================================
 
--- Prisma poligonal: raio = dist‚ncia do centro atÈ os vÈrtices
+-- Prisma poligonal: raio = dist√¢ncia do centro at√© os v√©rtices
 local function buildPrism(parent, name, center, radius, yBottom, yTop, rotation, color)
 	local sides = Style.PrismSides
 	local apothem = apothemOf(radius)
@@ -179,7 +179,7 @@ local function buildPrism(parent, name, center, radius, yBottom, yTop, rotation,
 		newPart({
 			Name = name .. "_" .. (i + 1),
 			Size = Vector3.new(2 * apothem, height, edge),
-			-- pequeno desnÌvel por bloco evita "piscar" (z-fighting) nas faces de cima
+			-- pequeno desn√≠vel por bloco evita "piscar" (z-fighting) nas faces de cima
 			CFrame = CFrame.new(center.X, midY - i * 0.012, center.Z) * CFrame.Angles(0, -angle, 0),
 			Color = color,
 			Parent = model,
@@ -206,7 +206,7 @@ local function buildPalm(parent, basePosition)
 	local frame = CFrame.new(basePosition) * CFrame.Angles(0, rng:NextNumber(0, 2 * math.pi), 0)
 	local segHeight = cfg.SegmentHeight * scale
 
-	-- Tronco: segmentos que v„o se inclinando
+	-- Tronco: segmentos que v√£o se inclinando
 	for i = 1, cfg.Segments do
 		local t = (i - 1) / math.max(cfg.Segments - 1, 1)
 		local width = (cfg.TrunkBaseWidth + (cfg.TrunkTopWidth - cfg.TrunkBaseWidth) * t) * scale
@@ -418,7 +418,7 @@ local function buildLighthouse(parent, baseY, center)
 	return model
 end
 
--- Espalha palmeiras e pedras sem sobreposiÁ„o. opts vem do MapConfig.Decor + alturas.
+-- Espalha palmeiras e pedras sem sobreposi√ß√£o. opts vem do MapConfig.Decor + alturas.
 local function scatterDecor(parent, center, radius, opts)
 	local placed = {}
 
@@ -464,7 +464,7 @@ local function scatterDecor(parent, center, radius, opts)
 	end
 end
 
--- Marcadores invisÌveis para o ResourceService (Etapa 3)
+-- Marcadores invis√≠veis para o ResourceService (Etapa 3)
 local function buildResourceMarkers(islandIndex, islandName, center, radius, groundY)
 	local cfg = MapConfig.ResourceMarkers
 	local spawnsRoot = Workspace.Map:FindFirstChild(MapConfig.Folders.ResourceSpawns)
@@ -521,7 +521,7 @@ local function buildBridge(parent, name, pointA, pointB)
 		Parent = model,
 	})
 
-	-- Corrim„os
+	-- Corrim√£os
 	for _, side in ipairs({ -1, 1 }) do
 		newPart({
 			Name = "Rail",
@@ -532,7 +532,7 @@ local function buildBridge(parent, name, pointA, pointB)
 		})
 	end
 
-	-- Postes do corrim„o
+	-- Postes do corrim√£o
 	local postCount = math.max(math.floor(length / cfg.PostSpacing), 1)
 	for i = 0, postCount do
 		local z = -length / 2 + length * i / postCount
@@ -547,7 +547,7 @@ local function buildBridge(parent, name, pointA, pointB)
 		end
 	end
 
-	-- Pilares atÈ o fundo do mar
+	-- Pilares at√© o fundo do mar
 	local floorY = -20
 	local pillarTop = cfg.DeckTop - cfg.DeckThickness
 	local pillarHeight = pillarTop - floorY
@@ -585,7 +585,7 @@ local function buildOcean(folder)
 	terrain.WaterWaveSize = cfg.Water.WaveSize
 	terrain.WaterWaveSpeed = cfg.Water.WaveSpeed
 
-	-- ¡gua fÌsica (d· para nadar). SuperfÌcie em Y = WaterLevel.
+	-- √Ågua f√≠sica (d√° para nadar). Superf√≠cie em Y = WaterLevel.
 	local ok, err = pcall(function()
 		terrain:FillBlock(
 			CFrame.new(0, MapConfig.WaterLevel - cfg.Depth / 2, 0),
@@ -594,7 +594,7 @@ local function buildOcean(folder)
 		)
 	end)
 	if not ok then
-		warn("[MapService] Falha ao criar a ·gua do Terrain: " .. tostring(err))
+		warn("[MapService] Falha ao criar a √°gua do Terrain: " .. tostring(err))
 	end
 
 	-- Fundo do mar
@@ -607,7 +607,7 @@ local function buildOcean(folder)
 	})
 	addGenerated(floor, folder)
 
-	-- Paredes invisÌveis nas bordas
+	-- Paredes invis√≠veis nas bordas
 	local half = cfg.Size / 2
 	local wallY = cfg.WallHeight / 2 - cfg.Depth
 	local walls = {
@@ -649,7 +649,7 @@ local function buildMainIsland(folder)
 
 	buildLighthouse(decor, summit.Top, center)
 
-	-- N„o plantar palmeiras onde as pontes chegam
+	-- N√£o plantar palmeiras onde as pontes chegam
 	local blocked = {}
 	if MapConfig.Bridges.LobbyToMain then
 		table.insert(blocked, -math.pi / 2)
@@ -714,7 +714,7 @@ local function buildPlayerIsland(index, folder)
 	local signPosition = Vector3.new(center.X - toCenter.X * cfg.Radius * 0.55, groundY, center.Z - toCenter.Z * cfg.Radius * 0.55)
 	local sign = buildSign(model, signPosition, center, string.format("%s %02d", cfg.Sign.Title, index), cfg.Sign.Subtitle, 1)
 
-	-- Ponto de nascimento (invisÌvel). O IslandService usa SpawnCFrame.
+	-- Ponto de nascimento (invis√≠vel). O IslandService usa SpawnCFrame.
 	local spawnPoint = newPart({
 		Name = "SpawnPoint",
 		Size = Vector3.new(4, 1, 4),
@@ -814,7 +814,7 @@ local function buildLobby(folder)
 end
 
 -- ===========================================================================
--- VALIDA«√O E GERA«√O
+-- VALIDA√á√ÉO E GERA√á√ÉO
 -- ===========================================================================
 
 local function validateLayout(circles)
@@ -828,7 +828,7 @@ local function validateLayout(circles)
 			local dx, dz = a.Position.X - b.Position.X, a.Position.Z - b.Position.Z
 			local gap = math.sqrt(dx * dx + dz * dz) - a.Radius - b.Radius
 			if gap < minGap then
-				warn(string.format("[MapService] SOBREPOSI«√O: %s e %s (espaÁo %.1f < %d)", a.Name, b.Name, gap, minGap))
+				warn(string.format("[MapService] SOBREPOSI√á√ÉO: %s e %s (espa√ßo %.1f < %d)", a.Name, b.Name, gap, minGap))
 				ok = false
 			end
 		end
@@ -871,7 +871,12 @@ local function generate()
 	buildOcean(oceanFolder)
 
 	local circles = {}
-	table.insert(circles, buildMainIsland(mainFolder))
+	if MapConfig.MainIsland.Enabled == false then
+		local cfg = MapConfig.MainIsland
+		table.insert(circles, { Name = "CentralIsland", Position = cfg.Position, Radius = cfg.Radius * 1.3 })
+	else
+		table.insert(circles, buildMainIsland(mainFolder))
+	end
 	for index = 1, MapConfig.PlayerIslands.Count do
 		table.insert(circles, buildPlayerIsland(index, playersFolder))
 	end
@@ -907,9 +912,9 @@ local function generate()
 	end
 
 	local layoutOk = validateLayout(circles)
-	log(layoutOk and "VerificaÁ„o de sobreposiÁ„o: OK (nenhuma ilha se sobrepıe)" or "VerificaÁ„o de sobreposiÁ„o: FALHOU (veja avisos acima)")
+	log(layoutOk and "Verifica√ß√£o de sobreposi√ß√£o: OK (nenhuma ilha se sobrep√µe)" or "Verifica√ß√£o de sobreposi√ß√£o: FALHOU (veja avisos acima)")
 	log(string.format(
-		"Mapa gerado em %.2fs | %d peÁas | %d ilhas de jogadores",
+		"Mapa gerado em %.2fs | %d pe√ßas | %d ilhas de jogadores",
 		os.clock() - startedAt, #mapFolder:GetDescendants() + #lobbyFolder:GetDescendants(), #slots
 		))
 end

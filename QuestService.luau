@@ -1,4 +1,4 @@
--- QuestService: missıes (Etapa 7)
+-- QuestService: miss√µes (Etapa 7)
 local QuestService = {}
 
 function QuestService.Init()

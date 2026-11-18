@@ -2,17 +2,17 @@
 	ResourceModelBuilder (ModuleScript)
 	Local: ServerScriptService > Services > ResourceModelBuilder   (arquivo NOVO)
 
-	Cria por cÛdigo os modelos-modelo (templates) dos recursos em ServerStorage > ResourceModels.
-	Se j· existir um modelo com o mesmo nome na pasta (feito por vocÍ), ele N√O È sobrescrito.
+	Cria por c√≥digo os modelos-modelo (templates) dos recursos em ServerStorage > ResourceModels.
+	Se j√° existir um modelo com o mesmo nome na pasta (feito por voc√™), ele N√ÉO √© sobrescrito.
 
-	FORMATO DE UM TEMPLATE (vale tambÈm para modelos feitos ‡ m„o):
+	FORMATO DE UM TEMPLATE (vale tamb√©m para modelos feitos √† m√£o):
 		Model "Nome"            (PrimaryPart = Root)
-		+-- Root                Part pequena e invisÌvel, na BASE do recurso (origem 0,0,0)
-		+-- Full                Model/Folder com as peÁas do recurso inteiro
-		+-- Depleted            Model/Folder (opcional) com o visual "esgotado" (toco, cascalho...)
-	Todas as peÁas: Anchored = true.
+		‚îú‚îÄ‚îÄ Root                Part pequena e invis√≠vel, na BASE do recurso (origem 0,0,0)
+		‚îú‚îÄ‚îÄ Full                Model/Folder com as pe√ßas do recurso inteiro
+		‚îî‚îÄ‚îÄ Depleted            Model/Folder (opcional) com o visual "esgotado" (toco, cascalho...)
+	Todas as pe√ßas: Anchored = true.
 
-	COMO ADICIONAR UM MODELO NOVO: crie uma funÁ„o em "builders" (veja o fim da seÁ„o BUILDERS).
+	COMO ADICIONAR UM MODELO NOVO: crie uma fun√ß√£o em "builders" (veja o fim da se√ß√£o BUILDERS).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,7 +25,7 @@ local builders = {}
 local rng = Random.new(4242)
 
 -- ===========================================================================
--- UTILIT¡RIOS
+-- UTILIT√ÅRIOS
 -- ===========================================================================
 
 local function tint(color)
@@ -135,7 +135,7 @@ builders.Tree = function(full, depleted)
 	make(depleted, "Log_2", CFrame.new(-1.4, 0.3, -1.0) * CFrame.Angles(0, -0.9, 0), Vector3.new(1.8, 0.6, 0.6), "Trunk", { Shape = Enum.PartType.Cylinder, CanCollide = false })
 end
 
--- PEDRA (blocos de ardÛsia/basalto girados). Esgotada: cascalho.
+-- PEDRA (blocos de ard√≥sia/basalto girados). Esgotada: cascalho.
 builders.Rock = function(full, depleted)
 	make(full, "Chunk_1", CFrame.new(0, 1.0, 0) * CFrame.Angles(rad(8), rad(25), rad(-6)), Vector3.new(3.4, 2.4, 3.0), "Rock")
 	make(full, "Chunk_2", CFrame.new(1.7, 0.7, 0.8) * CFrame.Angles(rad(-12), rad(60), rad(10)), Vector3.new(2.0, 1.6, 1.8), "RockDark")
@@ -144,7 +144,7 @@ builders.Rock = function(full, depleted)
 	buildRubble(depleted)
 end
 
--- MIN…RIO: rocha escura com cristais/veios do metal. Reutilizado por ferro e ouro.
+-- MIN√âRIO: rocha escura com cristais/veios do metal. Reutilizado por ferro e ouro.
 local function buildOre(full, depleted, oreStyle)
 	make(full, "Base_1", CFrame.new(0, 0.9, 0) * CFrame.Angles(rad(6), rad(20), rad(-5)), Vector3.new(3.4, 2.0, 3.0), "RockDark")
 	make(full, "Base_2", CFrame.new(1.6, 0.6, 0.9) * CFrame.Angles(rad(-10), rad(55), rad(8)), Vector3.new(1.9, 1.3, 1.8), "Rock")
@@ -211,7 +211,7 @@ function Builder.Register(templateName, buildFunction)
 	builders[templateName] = buildFunction
 end
 
--- Cria, dentro de "folder", os templates que ainda n„o existem
+-- Cria, dentro de "folder", os templates que ainda n√£o existem
 function Builder.EnsureTemplates(folder)
 	local created = 0
 	for key, def in pairs(ResourceConfig.Nodes) do

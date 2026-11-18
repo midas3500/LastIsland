@@ -2,11 +2,11 @@
 	LightingService
 	Local: ServerScriptService > Services > LightingService
 
-	Aplica presets de iluminaÁ„o (MapConfig.Lighting.Presets).
+	Aplica presets de ilumina√ß√£o (MapConfig.Lighting.Presets).
 	Uso futuro (EventService): LightingService.Apply("Storm")
 
-	OBS.: a mudanÁa È instant‚nea. TransiÁıes suaves ficam para o cliente (Etapa 6).
-	OBS.: Lighting.Technology n„o pode ser alterado por script; configure manualmente (seÁ„o 2.3-D).
+	OBS.: a mudan√ßa √© instant√¢nea. Transi√ß√µes suaves ficam para o cliente (Etapa 6).
+	OBS.: Lighting.Technology n√£o pode ser alterado por script; configure manualmente (se√ß√£o 2.3-D).
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -43,7 +43,7 @@ local function applyProps(target, props, label)
 			target[prop] = value
 		end)
 		if not ok then
-			warn(string.format("[LightingService] N„o foi possÌvel definir %s.%s: %s", label, prop, tostring(err)))
+			warn(string.format("[LightingService] N√£o foi poss√≠vel definir %s.%s: %s", label, prop, tostring(err)))
 		end
 	end
 end

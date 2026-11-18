@@ -9,8 +9,8 @@
 local EventConfig = {}
 
 EventConfig.Version = 1
-EventConfig.FirstEventDelay = 300  -- segundos até o primeiro desastre
-EventConfig.MinTimeBetween = 420   -- segundos mínimos entre desastres
+EventConfig.FirstEventDelay = 300  -- segundos atÃ© o primeiro desastre
+EventConfig.MinTimeBetween = 420   -- segundos mÃ­nimos entre desastres
 
 EventConfig.Events = {
 	Storm = {

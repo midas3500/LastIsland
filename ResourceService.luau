@@ -3,7 +3,7 @@
     ResourceService
     Local: ServerScriptService > Services > ResourceService
 
-    Sistema de coleta de recursos com ferramentas por nÌvel.
+    Sistema de coleta de recursos com ferramentas por n√≠vel.
     Ferramentas criadas pelo ToolModelFactory.
 ]]
 
@@ -46,7 +46,7 @@ local nodeCounter = 0
 
 local cancelSession
 
--- UTILIT¡RIOS
+-- UTILIT√ÅRIOS
 
 local function log(...)
 	if GameConfig.Debug then
@@ -95,7 +95,7 @@ local function createToolInstance(toolName, tier)
 	local toolDef = ResourceConfig.Tools[toolName]
 
 	if not toolDef then
-		warn("[ResourceService] Ferramenta n„o encontrada:", toolName)
+		warn("[ResourceService] Ferramenta n√£o encontrada:", toolName)
 		return nil
 	end
 
@@ -111,11 +111,11 @@ local function createToolInstance(toolName, tier)
 	end
 
 	if not tool or not tool:IsA("Tool") then
-		warn("[ResourceService] ToolModelFactory n„o retornou uma Tool v·lida.")
+		warn("[ResourceService] ToolModelFactory n√£o retornou uma Tool v√°lida.")
 		return nil
 	end
 
-	-- IdentificaÁ„o usada pelos outros sistemas do jogo.
+	-- Identifica√ß√£o usada pelos outros sistemas do jogo.
 	tool:SetAttribute("ToolType", toolName)
 	tool:SetAttribute("ToolTier", tier)
 
@@ -268,7 +268,7 @@ local function depleteNode(record)
 	end)
 end
 
--- SESS’ES
+-- SESS√ïES
 
 local function endSession(session)
 	local player = session.Player
@@ -319,17 +319,17 @@ local function checkSession(session)
 	local character, _, root = getCharacterParts(player)
 
 	if not character then
-		return false, "VocÍ foi derrotado."
+		return false, "Voc√™ foi derrotado."
 	end
 
 	local maxDistance = (record.Def.MaxDistance or Cfg.DefaultMaxDistance) + (Cfg.DistanceTolerance or 0)
 
 	if (root.Position - record.Root.Position).Magnitude > maxDistance then
-		return false, "VocÍ se afastou demais."
+		return false, "Voc√™ se afastou demais."
 	end
 
 	if record.State ~= "Ready" then
-		return false, "O recurso n„o est· mais disponÌvel."
+		return false, "O recurso n√£o est√° mais dispon√≠vel."
 	end
 
 	return true
@@ -375,7 +375,7 @@ local function completeGather(session)
 	local def = record.Def
 
 	if not PlayerDataService.GetData(player) then
-		cancelSession(session, "Seus dados n„o est„o disponÌveis.")
+		cancelSession(session, "Seus dados n√£o est√£o dispon√≠veis.")
 		return
 	end
 
@@ -466,7 +466,7 @@ local function startGather(player, record)
 	local def = record.Def
 
 	if sessions[player] then
-		return deny(player, "VocÍ j· est· coletando.")
+		return deny(player, "Voc√™ j√° est√° coletando.")
 	end
 
 	local now = os.clock()
@@ -476,13 +476,13 @@ local function startGather(player, record)
 	end
 
 	if record.State ~= "Ready" or record.User ~= nil then
-		return deny(player, "Este recurso n„o est· disponÌvel agora.")
+		return deny(player, "Este recurso n√£o est√° dispon√≠vel agora.")
 	end
 
 	local data = PlayerDataService.GetData(player)
 
 	if not data then
-		return deny(player, "Seus dados ainda est„o carregando.")
+		return deny(player, "Seus dados ainda est√£o carregando.")
 	end
 
 	local character, humanoid, root = getCharacterParts(player)
@@ -499,15 +499,15 @@ local function startGather(player, record)
 		end
 	end
 
-	-- DIST¬NCIA
+	-- DIST√ÇNCIA
 
 	local maxDistance = (def.MaxDistance or Cfg.DefaultMaxDistance) + (Cfg.DistanceTolerance or 2)
 
 	if (root.Position - record.Root.Position).Magnitude > maxDistance then
-		return deny(player, "VocÍ est· muito longe.")
+		return deny(player, "Voc√™ est√° muito longe.")
 	end
 
-	-- FERRAMENTA E NÕVEL
+	-- FERRAMENTA E N√çVEL
 
 	local toolData
 	local speed = 1
@@ -518,7 +518,7 @@ local function startGather(player, record)
 		local toolDef = ResourceConfig.Tools[def.Tool]
 
 		if not toolDef or not toolDef.Tiers then
-			return deny(player, "ConfiguraÁ„o da ferramenta inv·lida.")
+			return deny(player, "Configura√ß√£o da ferramenta inv√°lida.")
 		end
 
 		tier = clampTier(data.Tools and data.Tools[def.Tool], toolDef)
@@ -527,7 +527,7 @@ local function startGather(player, record)
 			return deny(
 				player,
 				string.format(
-					"Requer %s nÌvel %d.",
+					"Requer %s n√≠vel %d.",
 					toolDef.DisplayName or def.Tool,
 					def.MinTier or 1
 				)
@@ -539,12 +539,12 @@ local function startGather(player, record)
 		toolYield = toolData.Yield or 1
 	end
 
-	-- ESPA«O NA MOCHILA
+	-- ESPA√áO NA MOCHILA
 
 	local primary = def.Rewards and def.Rewards[1] and def.Rewards[1].Item
 
 	if not primary then
-		return deny(player, "Este recurso n„o possui recompensa configurada.")
+		return deny(player, "Este recurso n√£o possui recompensa configurada.")
 	end
 
 	if not InventoryService.CanAdd(player, primary, 1) then
@@ -629,7 +629,7 @@ local function createNode(marker, templates)
 	local template = templates:FindFirstChild(def.Template)
 
 	if not template then
-		warn("[ResourceService] Template n„o encontrado:", def.Template)
+		warn("[ResourceService] Template n√£o encontrado:", def.Template)
 		return false
 	end
 
@@ -676,7 +676,7 @@ local function createNode(marker, templates)
 	local minTierText = ""
 
 	if def.Tool and (def.MinTier or 1) > 1 then
-		minTierText = string.format(" (nÌvel %d)", def.MinTier)
+		minTierText = string.format(" (n√≠vel %d)", def.MinTier)
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
@@ -756,7 +756,7 @@ end
 
 function ResourceService.RegisterYieldModifier(callback)
 	if typeof(callback) ~= "function" then
-		warn("[ResourceService] Modifier precisa ser uma funÁ„o.")
+		warn("[ResourceService] Modifier precisa ser uma fun√ß√£o.")
 		return
 	end
 
@@ -776,17 +776,40 @@ function ResourceService.Debug_TryGather(player, nodeModel)
 
 	return startGather(player, record)
 end
+-- Cria um recurso em tempo de execu√ß√£o (usado pelos eventos da ilha)
+function ResourceService.SpawnAtMarker(marker)
+	local templates = ServerStorage:FindFirstChild("ResourceModels")
+	if not templates then return nil end
+	local before = #nodeList
+	if createNode(marker, templates) and #nodeList > before then
+		return nodeList[#nodeList].Model
+	end
+	return nil
+end
+
+function ResourceService.RemoveNode(model)
+	local record = nodes[model]
+	if not record then return end
+	record.State = "Removed"
+	record.RespawnToken = nil
+	if record.Prompt then record.Prompt.Enabled = false end
+	nodes[model] = nil
+	for i, r in ipairs(nodeList) do
+		if r == record then table.remove(nodeList, i) break end
+	end
+	model:Destroy()
+end
 
 function ResourceService.Init()
 end
 
--- INICIALIZA«√O
+-- INICIALIZA√á√ÉO
+
 
 function ResourceService.Start()
 	remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CollectResource")
 
 	-- TEMPLATES
-
 	local templates = ServerStorage:FindFirstChild("ResourceModels")
 
 	if not templates then
@@ -797,17 +820,22 @@ function ResourceService.Start()
 
 	local created = ResourceModelBuilder.EnsureTemplates(templates)
 
+	-- TEMPLATES DOS RECURSOS DA ILHA
+	local okGen, IslandGenerator = pcall(require, script.Parent:WaitForChild("IslandGenerator"))
+	if okGen then
+		IslandGenerator.EnsureTemplates(templates)
+	end
+
 	log(created, "modelo(s) de recurso criado(s).")
 
 	-- MARCADORES DO MAPA
-
 	local mapFolder = Workspace:FindFirstChild(MapConfig.Folders.Map)
 
 	local spawnsRoot = mapFolder
 		and mapFolder:FindFirstChild(MapConfig.Folders.ResourceSpawns)
 
 	if not spawnsRoot then
-		warn("[ResourceService] Pasta ResourceSpawns n„o encontrada. Verifique o MapService.")
+		warn("[ResourceService] Pasta ResourceSpawns n√£o encontrada. Verifique o MapService.")
 		return
 	end
 
@@ -826,7 +854,6 @@ function ResourceService.Start()
 	log(total, "recursos criados no mapa.")
 
 	-- CANCELAMENTO PELO CLIENTE
-
 	remote.OnServerEvent:Connect(function(player, action)
 		if action ~= "Cancel" then
 			return

@@ -7,7 +7,7 @@
     - Fome
     - Stamina
     - Corrida
-    - Alimentação
+    - AlimentaÃ§Ã£o
     - Dano por fome
     - Ciclo de dia e noite
 
@@ -139,7 +139,7 @@ local function initializePlayer(player, data)
 		task.spawn(updateCharacter, player, player.Character)
 	end
 
-	log("Sobrevivência inicializada:", player.Name)
+	log("SobrevivÃªncia inicializada:", player.Name)
 end
 
 local function removePlayer(player)
@@ -183,7 +183,7 @@ local function onSprintRequest(player, enabled)
 	setSprint(player, enabled)
 end
 
--- ALIMENTAÇÃO --------------------------------------------
+-- ALIMENTAÃ‡ÃƒO --------------------------------------------
 
 local function onFoodRequest(player, action)
 	if action ~= "EatCoconut" then
@@ -218,7 +218,7 @@ local function onFoodRequest(player, action)
 		player,
 		"Coconut",
 		1,
-		"Alimentação"
+		"AlimentaÃ§Ã£o"
 	)
 
 	if not removed then
@@ -236,7 +236,7 @@ local function onFoodRequest(player, action)
 	log(player.Name, "comeu um coco. Fome:", state.Hunger)
 end
 
--- ATUALIZAÇÃO DA SOBREVIVÊNCIA ----------------------------
+-- ATUALIZAÃ‡ÃƒO DA SOBREVIVÃŠNCIA ----------------------------
 
 local function updatePlayer(player, deltaTime)
 	local state = getState(player)
@@ -300,7 +300,7 @@ local function updatePlayer(player, deltaTime)
 	end
 
 	-- SALVA A FOME NA TABELA DO PERFIL.
-	-- O autosave do PlayerDataService fará o salvamento real.
+	-- O autosave do PlayerDataService farÃ¡ o salvamento real.
 	if not PlayerDataService.IsReadOnly(player) then
 		state.SaveTimer += deltaTime
 
@@ -340,7 +340,7 @@ local function updateDayNight(elapsed)
 	Lighting:SetAttribute("WorldClockTime", clockTime)
 end
 
--- INICIALIZAÇÃO -------------------------------------------
+-- INICIALIZAÃ‡ÃƒO -------------------------------------------
 
 function SurvivalService.Init()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -348,7 +348,7 @@ function SurvivalService.Init()
 	sprintRemote = remotes:WaitForChild("SprintRequest")
 	foodRemote = remotes:WaitForChild("FoodRequest")
 
-	log("Init concluído.")
+	log("Init concluÃ­do.")
 end
 
 function SurvivalService.Start()
@@ -380,7 +380,7 @@ function SurvivalService.Start()
 	local elapsed = 0
 	local updateTimer = 0
 
-	-- Relógio começa às 08:00.
+	-- RelÃ³gio comeÃ§a Ã s 08:00.
 	updateDayNight(elapsed)
 
 	task.spawn(function()
@@ -398,7 +398,7 @@ function SurvivalService.Start()
 		end
 	end)
 
-	log("Sistema de sobrevivência iniciado.")
+	log("Sistema de sobrevivÃªncia iniciado.")
 end
 
 return SurvivalService

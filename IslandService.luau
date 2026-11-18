@@ -3,7 +3,7 @@
 	Local: ServerScriptService > Services > IslandService
 
 	Atribui uma das 12 ilhas a cada jogador, protege a posse da ilha, mostra o dono,
-	reserva a ilha para reconex„o e a libera quando a reserva expira.
+	reserva a ilha para reconex√£o e a libera quando a reserva expira.
 
 	ESTADOS DE UMA ILHA
 		Free      : sem dono
@@ -11,13 +11,13 @@
 		Reserved  : dono saiu; ilha guardada por Islands.ReconnectGraceSeconds
 
 	SIMULTANEIDADE
-		A funÁ„o claim() N√O tem pausas (task.wait, WaitForChild, DataStore...). Em Luau, cÛdigo sem
-		pausas nunca È interrompido por outro script, ent„o duas entradas nunca escolhem a mesma ilha.
+		A fun√ß√£o claim() N√ÉO tem pausas (task.wait, WaitForChild, DataStore...). Em Luau, c√≥digo sem
+		pausas nunca √© interrompido por outro script, ent√£o duas entradas nunca escolhem a mesma ilha.
 
-	API PARA OUTROS SERVI«OS
+	API PARA OUTROS SERVI√áOS
 		IslandService.GetIslandOf(player)            -> info da ilha do jogador (ou nil)
 		IslandService.GetIslandByIndex(index)        -> info
-		IslandService.GetIslandAt(position)          -> info da ilha que contÈm a posiÁ„o (ou nil)
+		IslandService.GetIslandAt(position)          -> info da ilha que cont√©m a posi√ß√£o (ou nil)
 		IslandService.IsOwner(player, index)         -> boolean
 		IslandService.CanBuildAt(player, position)   -> ok, motivo
 		IslandService.CanBuildBox(player, cframe, size) -> ok, motivo
@@ -34,7 +34,7 @@ local GameConfig = require(Modules:WaitForChild("GameConfig"))
 
 local Cfg = GameConfig.Islands
 if not Cfg then
-	error("[IslandService] GameConfig.Islands n„o existe. FaÁa o passo 1.2 da Etapa 2 (editar o GameConfig).")
+	error("[IslandService] GameConfig.Islands n√£o existe. Fa√ßa o passo 1.2 da Etapa 2 (editar o GameConfig).")
 end
 
 local MapService = require(script.Parent:WaitForChild("MapService"))
@@ -55,7 +55,7 @@ local releasedCallbacks = {}
 local processWaiting -- declarada aqui, definida mais abaixo
 
 -- ===========================================================================
--- UTILIT¡RIOS
+-- UTILIT√ÅRIOS
 -- ===========================================================================
 
 local function log(...)
@@ -83,7 +83,7 @@ local function displayNameOf(player)
 	return player.Name
 end
 
--- CÛpia somente-leitura das informaÁıes da ilha (os outros serviÁos nunca recebem o estado interno)
+-- C√≥pia somente-leitura das informa√ß√µes da ilha (os outros servi√ßos nunca recebem o estado interno)
 local function publicInfo(state)
 	local slot = state.Slot
 	return {
@@ -213,7 +213,7 @@ local function reserveSlot(state)
 	refreshVisuals(state)
 	log(string.format("Ilha %02d RESERVADA para %s por %ds", state.Index, state.OwnerName, grace))
 
-	-- Sem loop: um ˙nico timer por reserva. Se o dono voltar, o token muda e este timer n„o faz nada.
+	-- Sem loop: um √∫nico timer por reserva. Se o dono voltar, o token muda e este timer n√£o faz nada.
 	task.delay(grace, function()
 		if state.ReserveToken == token and state.State == "Reserved" then
 			releaseSlot(state, "expired")
@@ -222,12 +222,12 @@ local function reserveSlot(state)
 	end)
 end
 
--- Escolhe a ilha do jogador. N√O PODE TER PAUSAS (yields) aqui dentro.
--- Retorna (estado, motivo) ou nil se n„o houver ilha.
+-- Escolhe a ilha do jogador. N√ÉO PODE TER PAUSAS (yields) aqui dentro.
+-- Retorna (estado, motivo) ou nil se n√£o houver ilha.
 local function claim(player, preferredIndex)
 	local userId = player.UserId
 
-	-- 1) J· È dono de uma ilha neste servidor (reconex„o ou chamada repetida)
+	-- 1) J√° √© dono de uma ilha neste servidor (reconex√£o ou chamada repetida)
 	local ownedIndex = ownerByUserId[userId]
 	if ownedIndex then
 		local state = states[ownedIndex]
@@ -322,10 +322,10 @@ local function teleportToIsland(player)
 end
 
 -- ===========================================================================
--- ATRIBUI«√O
+-- ATRIBUI√á√ÉO
 -- ===========================================================================
 
--- TambÈm N√O tem pausas (o teleporte roda em outra thread)
+-- Tamb√©m N√ÉO tem pausas (o teleporte roda em outra thread)
 local function finishAssign(player, data, state, how)
 	if data then
 		data.Island = data.Island or {}
@@ -362,7 +362,7 @@ local function assignPlayer(player, data)
 			table.insert(waiting, { Player = player, Data = data })
 		end
 		player:SetAttribute("IslandIndex", 0)
-		warn(string.format("[IslandService] Sem ilha disponÌvel para %s. Entrou na fila (posiÁ„o %d).", player.Name, #waiting))
+		warn(string.format("[IslandService] Sem ilha dispon√≠vel para %s. Entrou na fila (posi√ß√£o %d).", player.Name, #waiting))
 		return
 	end
 
@@ -403,7 +403,7 @@ local function onPlayerRemoving(player)
 
 	local state = states[index]
 	if state.Player ~= player then
-		return -- esta ilha j· pertence a uma nova conex„o do mesmo jogador
+		return -- esta ilha j√° pertence a uma nova conex√£o do mesmo jogador
 	end
 
 	reserveSlot(state)
@@ -417,7 +417,7 @@ local function hookCharacter(player)
 end
 
 -- ===========================================================================
--- API P⁄BLICA
+-- API P√öBLICA
 -- ===========================================================================
 
 function IslandService.GetIslandOf(player)
@@ -455,19 +455,19 @@ function IslandService.IsOwner(player, index)
 	return info ~= nil and info.Index == index
 end
 
--- ValidaÁ„o de construÁ„o. SEMPRE chame no servidor, com a posiÁ„o que o SERVIDOR calculou.
+-- Valida√ß√£o de constru√ß√£o. SEMPRE chame no servidor, com a posi√ß√£o que o SERVIDOR calculou.
 -- Retorna true, ou false + motivo.
 function IslandService.CanBuildAt(player, position)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return false, "Jogador inv·lido"
+		return false, "Jogador inv√°lido"
 	end
 	if typeof(position) ~= "Vector3" or position.X ~= position.X or position.Y ~= position.Y or position.Z ~= position.Z then
-		return false, "PosiÁ„o inv·lida"
+		return false, "Posi√ß√£o inv√°lida"
 	end
 
 	local own = IslandService.GetIslandOf(player)
 	if not own then
-		return false, "VocÍ ainda n„o tem uma ilha"
+		return false, "Voc√™ ainda n√£o tem uma ilha"
 	end
 
 	local dx = position.X - own.Center.X
@@ -477,20 +477,20 @@ function IslandService.CanBuildAt(player, position)
 		if other and other.Index ~= own.Index then
 			return false, "Esta ilha pertence a outro jogador"
 		end
-		return false, "Fora da ·rea de construÁ„o da sua ilha"
+		return false, "Fora da √°rea de constru√ß√£o da sua ilha"
 	end
 
 	if position.Y < own.GroundY - 2 or position.Y > own.GroundY + Cfg.MaxBuildHeight then
-		return false, "Altura inv·lida"
+		return false, "Altura inv√°lida"
 	end
 
 	return true
 end
 
--- Valida o "pÈ" (4 cantos + centro) de uma peÁa. Use para construÁıes.
+-- Valida o "p√©" (4 cantos + centro) de uma pe√ßa. Use para constru√ß√µes.
 function IslandService.CanBuildBox(player, cframe, size)
 	if typeof(cframe) ~= "CFrame" or typeof(size) ~= "Vector3" then
-		return false, "Dados inv·lidos"
+		return false, "Dados inv√°lidos"
 	end
 
 	local hx, hz = size.X / 2, size.Z / 2
@@ -523,7 +523,7 @@ function IslandService.OnReleased(callback)
 	table.insert(releasedCallbacks, callback)
 end
 
--- Mostra o estado das 12 ilhas no Output (˙til nos testes)
+-- Mostra o estado das 12 ilhas no Output (√∫til nos testes)
 function IslandService.PrintStatus()
 	print("[IslandService] ===== STATUS DAS ILHAS =====")
 	for index = 1, #states do
@@ -533,7 +533,7 @@ function IslandService.PrintStatus()
 	print(string.format("  Fila de espera: %d", #waiting))
 end
 
--- FunÁıes de TESTE (sÛ funcionam com GameConfig.Debug = true)
+-- Fun√ß√µes de TESTE (s√≥ funcionam com GameConfig.Debug = true)
 function IslandService.Debug_SimulateLeave(player)
 	if not GameConfig.Debug then
 		return false
@@ -559,7 +559,7 @@ end
 
 function IslandService.Start()
 	if not MapService.IsReady() then
-		warn("[IslandService] MapService n„o est· pronto. IslandService DESATIVADO.")
+		warn("[IslandService] MapService n√£o est√° pronto. IslandService DESATIVADO.")
 		return
 	end
 
@@ -586,7 +586,7 @@ function IslandService.Start()
 		hookCharacter(player)
 	end
 
-	-- A ilha sÛ È atribuÌda depois que os dados do jogador carregam
+	-- A ilha s√≥ √© atribu√≠da depois que os dados do jogador carregam
 	PlayerDataService.OnLoaded(function(player, data)
 		assignPlayer(player, data)
 	end)

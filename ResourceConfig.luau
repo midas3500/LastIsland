@@ -25,8 +25,8 @@ ResourceConfig.Gathering = {
 ResourceConfig.Items = {
 	Wood = {
 		DisplayName = "Madeira",
-		Emoji = "??",
-		Description = "Madeira resistente, utilizada para construÁıes e ferramentas.",
+		Emoji = "ü™µ",
+		Description = "Madeira resistente, utilizada para constru√ß√µes e ferramentas.",
 		MaxStack = 999,
 		Order = 1,
 		Color = Color3.fromRGB(176, 128, 78),
@@ -34,7 +34,7 @@ ResourceConfig.Items = {
 
 	Stone = {
 		DisplayName = "Pedra",
-		Emoji = "??",
+		Emoji = "ü™®",
 		Description = "Pedras coletadas nas rochas da ilha.",
 		MaxStack = 999,
 		Order = 2,
@@ -43,26 +43,26 @@ ResourceConfig.Items = {
 
 	Fiber = {
 		DisplayName = "Fibra",
-		Emoji = "??",
-		Description = "Material natural utilizado na fabricaÁ„o de objetos.",
+		Emoji = "üåø",
+		Description = "Material natural utilizado na fabrica√ß√£o de objetos.",
 		MaxStack = 999,
 		Order = 3,
 		Color = Color3.fromRGB(120, 180, 90),
 	},
 
 	IronOre = {
-		DisplayName = "MinÈrio de Ferro",
-		Emoji = "??",
-		Description = "MinÈrio met·lico utilizado para melhorar ferramentas.",
+		DisplayName = "Min√©rio de Ferro",
+		Emoji = "‚õìÔ∏è",
+		Description = "Min√©rio met√°lico utilizado para melhorar ferramentas.",
 		MaxStack = 999,
 		Order = 4,
 		Color = Color3.fromRGB(190, 120, 85),
 	},
 
 	GoldOre = {
-		DisplayName = "MinÈrio de Ouro",
-		Emoji = "??",
-		Description = "MinÈrio raro necess·rio para melhorias avanÁadas.",
+		DisplayName = "Min√©rio de Ouro",
+		Emoji = "ü™ô",
+		Description = "Min√©rio raro necess√°rio para melhorias avan√ßadas.",
 		MaxStack = 999,
 		Order = 5,
 		Color = Color3.fromRGB(240, 200, 70),
@@ -70,7 +70,7 @@ ResourceConfig.Items = {
 
 	Coconut = {
 		DisplayName = "Coco",
-		Emoji = "??",
+		Emoji = "ü••",
 		Description = "Fruta tropical que recupera 10 pontos de fome.",
 		MaxStack = 999,
 		Order = 6,
@@ -81,12 +81,12 @@ ResourceConfig.Items = {
 	},
 }
 
--- FERRAMENTAS E NÕVEIS
+-- FERRAMENTAS E N√çVEIS
 ResourceConfig.Tools = {
 	Axe = {
 		DisplayName = "Machado",
-		Emoji = "??",
-		Description = "Utilizado para cortar ·rvores e coletar madeira.",
+		Emoji = "ü™ì",
+		Description = "Utilizado para cortar √°rvores e coletar madeira.",
 
 		Tiers = {
 			[1] = {
@@ -118,8 +118,8 @@ ResourceConfig.Tools = {
 
 	Pickaxe = {
 		DisplayName = "Picareta",
-		Emoji = "??",
-		Description = "Utilizada para quebrar pedras e minerar minÈrios.",
+		Emoji = "‚õèÔ∏è",
+		Description = "Utilizada para quebrar pedras e minerar min√©rios.",
 
 		Tiers = {
 			[1] = {
@@ -155,7 +155,7 @@ ResourceConfig.ToolVisual = {
 	HandleLength = 3.2,
 }
 
--- APAR NCIA DOS RECURSOS
+-- APAR√äNCIA DOS RECURSOS
 ResourceConfig.Visuals = {
 	Trunk = {
 		Color = Color3.fromRGB(128, 92, 58),
@@ -214,7 +214,7 @@ ResourceConfig.Visuals = {
 	},
 }
 
--- RECURSOS COLET¡VEIS
+-- RECURSOS COLET√ÅVEIS
 ResourceConfig.Nodes = {
 	Tree = {
 		DisplayName = "Palmeira",
@@ -273,7 +273,7 @@ ResourceConfig.Nodes = {
 	},
 
 	OreIron = {
-		DisplayName = "MinÈrio de Ferro",
+		DisplayName = "Min√©rio de Ferro",
 		Template = "OreIron",
 		ActionText = "Minerar",
 		ActionLabel = "Minerando ferro...",
@@ -301,7 +301,7 @@ ResourceConfig.Nodes = {
 	},
 
 	OreGold = {
-		DisplayName = "MinÈrio de Ouro",
+		DisplayName = "Min√©rio de Ouro",
 		Template = "OreGold",
 		ActionText = "Minerar",
 		ActionLabel = "Minerando ouro...",
@@ -371,5 +371,7 @@ ResourceConfig.ToolUpgradeCosts = {
 		[3] = { Wood = 50, Stone = 50, IronOre = 30, GoldOre = 8 },
 	},
 }
+
+require(script.Parent.ResourceConfigAdditions)(ResourceConfig)
 
 return ResourceConfig

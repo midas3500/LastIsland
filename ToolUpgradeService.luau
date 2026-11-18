@@ -34,19 +34,19 @@ local function upgrade(player, toolName, updateRemote)
 		or not ResourceConfig.Tools[toolName]
 		or not ResourceConfig.ToolUpgradeCosts[toolName] then
 
-		return false, "Ferramenta inv·lida."
+		return false, "Ferramenta inv√°lida."
 	end
 	if not PlayerDataService.IsLoaded(player) then
-		return false, "Seus dados ainda est„o carregando."
+		return false, "Seus dados ainda est√£o carregando."
 	end
 
 	if PlayerDataService.IsReadOnly(player) then
-		return false, "Seus dados est„o em modo somente leitura."
+		return false, "Seus dados est√£o em modo somente leitura."
 	end
 
 	local data = PlayerDataService.GetData(player)
 	if not data then
-		return false, "Dados do jogador indisponÌveis."
+		return false, "Dados do jogador indispon√≠veis."
 	end
 
 	data.Tools = data.Tools or {}
@@ -55,22 +55,22 @@ local function upgrade(player, toolName, updateRemote)
 	local nextTier = currentTier + 1
 
 	if nextTier > 3 then
-		return false, "Essa ferramenta j· est· no nÌvel m·ximo."
+		return false, "Essa ferramenta j√° est√° no n√≠vel m√°ximo."
 	end
 
 	local toolCosts = ResourceConfig.ToolUpgradeCosts[toolName]
 	local cost = toolCosts and toolCosts[nextTier]
 
 	if not cost then
-		return false, "Melhoria n„o configurada."
+		return false, "Melhoria n√£o configurada."
 	end
 
 	if not InventoryService.HasItems(player, cost) then
-		return false, "VocÍ n„o possui todos os materiais."
+		return false, "Voc√™ n√£o possui todos os materiais."
 	end
 
 	if not InventoryService.RemoveItems(player, cost) then
-		return false, "N„o foi possÌvel retirar os materiais."
+		return false, "N√£o foi poss√≠vel retirar os materiais."
 	end
 
 	data.Tools[toolName] = nextTier
@@ -78,11 +78,11 @@ local function upgrade(player, toolName, updateRemote)
 	InventoryService.Sync(player)
 	sendState(player, updateRemote)
 
-	return true, toolName .. " melhorado para o nÌvel " .. nextTier .. "!"
+	return true, toolName .. " melhorado para o n√≠vel " .. nextTier .. "!"
 end
 
 function ToolUpgradeService.Init()
-	-- Os remotes s„o criados pelo Main a partir do GameConfig.
+	-- Os remotes s√£o criados pelo Main a partir do GameConfig.
 end
 
 function ToolUpgradeService.Start()

@@ -3,14 +3,14 @@
 	Local: ReplicatedStorage > Modules > MapConfig
 
 	Todas as medidas, cores e quantidades do mapa. Unidades em "studs".
-	Mapa: Eixo X = leste/oeste, eixo Z = norte/sul, Y = altura. O nÌvel da ·gua È Y = 0.
+	Mapa: Eixo X = leste/oeste, eixo Z = norte/sul, Y = altura. O n√≠vel da √°gua √© Y = 0.
 ]]
 
 local MapConfig = {}
 
-MapConfig.Seed = 20260115 -- mesma semente = mesmo mapa. Mude para variar a decoraÁ„o.
+MapConfig.Seed = 20260115 -- mesma semente = mesmo mapa. Mude para variar a decora√ß√£o.
 
--- Objetos do template padr„o que o gerador remove se ainda existirem
+-- Objetos do template padr√£o que o gerador remove se ainda existirem
 MapConfig.RemoveDefaultObjects = { "Baseplate", "SpawnLocation" }
 
 -- Nomes das pastas criadas no Workspace
@@ -24,11 +24,11 @@ MapConfig.Folders = {
 	Lobby = "Lobby",
 }
 
--- Estilo low poly: ilhas s„o prismas de N lados (N precisa ser PAR)
+-- Estilo low poly: ilhas s√£o prismas de N lados (N precisa ser PAR)
 MapConfig.Style = {
 	PrismSides = 10,
 	Material = Enum.Material.SmoothPlastic, -- cor chapada = visual low poly
-	ColorJitter = 0.04,                     -- variaÁ„o leve de cor entre peÁas
+	ColorJitter = 0.04,                     -- varia√ß√£o leve de cor entre pe√ßas
 }
 
 MapConfig.Palette = {
@@ -48,8 +48,8 @@ MapConfig.Palette = {
 	LampGlow = Color3.fromRGB(255, 220, 130),
 	SpawnPad = Color3.fromRGB(90, 170, 230),
 }
--- MATERIAIS (texturas nativas do Roblox). A chave È o INÕCIO do nome da peÁa
--- (ex.: "Beach_3" usa a chave "Beach"). Para trocar o visual, mude sÛ aqui.
+-- MATERIAIS (texturas nativas do Roblox). A chave √© o IN√çCIO do nome da pe√ßa
+-- (ex.: "Beach_3" usa a chave "Beach"). Para trocar o visual, mude s√≥ aqui.
 MapConfig.Materials = {
 	Default = Enum.Material.Plastic,
 	ByName = {
@@ -78,11 +78,11 @@ MapConfig.Materials = {
 	},
 }
 
--- OCEANO (·gua fÌsica do Terrain, nada de modelos externos)
-MapConfig.WaterLevel = 0 -- n„o altere sem ajustar as ilhas (m˙ltiplo de 4)
+-- OCEANO (√°gua f√≠sica do Terrain, nada de modelos externos)
+MapConfig.WaterLevel = 0 -- n√£o altere sem ajustar as ilhas (m√∫ltiplo de 4)
 MapConfig.Ocean = {
-	Size = 1320,   -- lado do quadrado do oceano (m˙ltiplo de 8)
-	Depth = 20,    -- profundidade da ·gua (m˙ltiplo de 4)
+	Size = 1320,   -- lado do quadrado do oceano (m√∫ltiplo de 8)
+	Depth = 20,    -- profundidade da √°gua (m√∫ltiplo de 4)
 	WallHeight = 300,
 	FloorColor = Color3.fromRGB(26, 72, 120),
 	Water = {
@@ -119,7 +119,7 @@ MapConfig.PlayerIslands = {
 	Tiers = islandTiers({
 		{ Name = "Grass", Scale = 0.82, Bottom = 0.0, Top = 1.6, Color = "Grass" },
 	}),
-	Sign = { Title = "ILHA", Subtitle = "DisponÌvel" },
+	Sign = { Title = "ILHA", Subtitle = "Dispon√≠vel" },
 }
 
 -- ILHA CENTRAL (decorativa, com colina e farol)
@@ -159,12 +159,12 @@ MapConfig.Bridges = {
 	PostSpacing = 16,
 	PillarSpacing = 28,
 	LobbyToMain = true,
-	-- false = ilhas de jogadores ficam isoladas (ideal para proteger construÁıes).
-	-- true  = cada ilha ganha uma ponte atÈ a ilha central.
+	-- false = ilhas de jogadores ficam isoladas (ideal para proteger constru√ß√µes).
+	-- true  = cada ilha ganha uma ponte at√© a ilha central.
 	PlayerIslandsToMain = false,
 }
 
--- DECORA«√O (valores de PalmMin/Max/RockMin/Max s„o fraÁıes do raio da ilha)
+-- DECORA√á√ÉO (valores de PalmMin/Max/RockMin/Max s√£o fra√ß√µes do raio da ilha)
 MapConfig.Decor = {
 	MinSpacing = 7,
 	PlayerIsland = { Palms = 7,  Rocks = 5,  PalmMin = 0.66, PalmMax = 0.90, RockMin = 0.84, RockMax = 0.92 },
@@ -185,7 +185,7 @@ MapConfig.Palm = {
 	MaxScale = 1.25,
 }
 
--- Marcadores invisÌveis onde o ResourceService (Etapa 3) criar· ·rvores, pedras e arbustos.
+-- Marcadores invis√≠veis onde o ResourceService (Etapa 3) criar√° √°rvores, pedras e arbustos.
 -- As chaves combinam com ResourceConfig.Nodes.
 MapConfig.ResourceMarkers = {
 	Counts = { Tree = 5, Rock = 4, Bush = 3, OreIron = 2, OreGold = 1 },
@@ -194,12 +194,12 @@ MapConfig.ResourceMarkers = {
 	MaxRadiusScale = 0.62,
 }
 
--- VerificaÁ„o autom·tica de sobreposiÁ„o
+-- Verifica√ß√£o autom√°tica de sobreposi√ß√£o
 MapConfig.Validation = {
-	MinGap = 20, -- espaÁo mÌnimo (·gua) entre as bordas de duas ilhas
+	MinGap = 20, -- espa√ßo m√≠nimo (√°gua) entre as bordas de duas ilhas
 }
 
--- ILUMINA«√O: presets aplicados pelo LightingService
+-- ILUMINA√á√ÉO: presets aplicados pelo LightingService
 MapConfig.Lighting = {
 	DefaultPreset = "Day",
 	Presets = {
@@ -265,5 +265,7 @@ MapConfig.Lighting = {
 		},
 	},
 }
+
+require(script.Parent.MapConfigPatch)(MapConfig)
 
 return MapConfig

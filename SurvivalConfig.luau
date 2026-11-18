@@ -12,7 +12,7 @@ SurvivalConfig.Hunger = {
 	StarvationDamage = 4,
 	DamageInterval = 3,
 
-	-- AlimentaÁ„o
+	-- Alimenta√ß√£o
 	CoconutRestore = 25,
 }
 
@@ -40,7 +40,7 @@ SurvivalConfig.DayNight = {
 	StartDay = 1,
 }
 
--- ATUALIZA«√O
+-- ATUALIZA√á√ÉO
 SurvivalConfig.UpdateInterval = 0.2
 SurvivalConfig.ProfileSaveInterval = 5
 
