@@ -539,14 +539,32 @@ local function ellipsoid(model, base, off, size, color, material, collide)
 	return part(model, base, off, size, color, material, Enum.PartType.Ball, collide)
 end
 
--- Cogumelos (comida)
-function B.Mushroom(m, base, r)
+-- Cogumelos (3 espécies, cada uma com cores próprias; os efeitos estão no NutritionConfig)
+local function mushroomPatch(m, base, r, capA, capB, spots, glow)
 	for i = 1, 5 do
 		local a, d, s = r:NextNumber(0, 6.28), r:NextNumber(0.1, 1.5), r:NextNumber(0.6, 1.2)
 		local x, z = math.cos(a) * d, math.sin(a) * d
 		cyl(m, base, CFrame.new(x, 0.45 * s, z), 0.9 * s, 0.35 * s, COL.MushStem, MAT.SmoothPlastic, false)
-		ellipsoid(m, base, CFrame.new(x, 0.95 * s, z), Vector3.new(1.3, 0.7, 1.3) * s, (i % 2 == 0) and COL.MushCap or COL.MushCap2, MAT.SmoothPlastic, false)
+		local capColor = (i % 2 == 0) and capA or capB
+		local cap = ellipsoid(m, base, CFrame.new(x, 0.95 * s, z), Vector3.new(1.3, 0.7, 1.3) * s, capColor, glow and MAT.Neon or MAT.SmoothPlastic, false)
+		if glow then cap.Transparency = 0.1 end
+		if spots then
+			for k = 1, 3 do
+				local sa = r:NextNumber(0, 6.28)
+				ellipsoid(m, base, CFrame.new(x + math.cos(sa) * 0.3 * s, 1.2 * s, z + math.sin(sa) * 0.3 * s), Vector3.new(0.18, 0.1, 0.18) * s, Color3.fromRGB(250, 250, 245), MAT.SmoothPlastic, false)
+			end
+		end
 	end
+end
+
+function B.Mushroom(m, base, r) -- Cogumelo Marrom
+	mushroomPatch(m, base, r, Color3.fromRGB(160, 110, 70), Color3.fromRGB(190, 140, 90), false, false)
+end
+function B.MushroomRed(m, base, r) -- Cogumelo Vermelho (com pintinhas)
+	mushroomPatch(m, base, r, Color3.fromRGB(215, 50, 50), Color3.fromRGB(190, 40, 60), true, false)
+end
+function B.MushroomBlue(m, base, r) -- Cogumelo Azul (brilha)
+	mushroomPatch(m, base, r, Color3.fromRGB(90, 160, 255), Color3.fromRGB(120, 120, 255), false, true)
 end
 
 -- Depósito de argila (praia/margem)
@@ -630,7 +648,7 @@ end
 -- Modelos-modelo para o ResourceService (Root + Full + Depleted)
 ----------------------------------------------------------------------
 local TREE_LIKE = { Tree = true, OakTree = true, PineTree = true, AppleTree = true, BananaTree = true, IronwoodTree = true }
-local BUSH_LIKE = { Bush = true, BerryBush = true, HerbBush = true, Mushroom = true }
+local BUSH_LIKE = { Bush = true, BerryBush = true, HerbBush = true, Mushroom = true, MushroomRed = true, MushroomBlue = true }
 local NO_STUMP = { Driftwood = true, ShellPile = true }
 
 local function hashName(s)
@@ -1133,6 +1151,89 @@ local function scatterEntry(entry, areaScale)
 end
 
 ----------------------------------------------------------------------
+-- Pontes: removidas (travessia a nado / de barco no futuro)
+----------------------------------------------------------------------
+local function removeAllBridges(keepRoot)
+	local found = {}
+	for _, inst in Workspace:GetDescendants() do
+		if (inst:IsA("Model") or inst:IsA("Folder")) and inst.Name:match("^Bridge")
+			and inst ~= keepRoot and not inst:IsDescendantOf(keepRoot) then
+			table.insert(found, inst)
+		end
+	end
+	for _, inst in found do
+		inst:Destroy()
+	end
+	return #found
+end
+
+----------------------------------------------------------------------
+-- Mar infinito: planos de água gigantes além da borda do oceano + neblina no horizonte
+----------------------------------------------------------------------
+local function buildInfiniteSea(parent)
+	local C = Cfg.Sea
+	if not C or not C.Enabled then return end
+
+	local ocean = MapConfig.Ocean
+	local center = ocean.Position or ocean.Center or MapConfig.MainIsland.Position
+	local half = ocean.Size / 2
+	local extent = C.Extent
+	local TILE = 2000
+	local top = Sea - 0.05
+	local water = Workspace.Terrain.WaterColor:Lerp(Color3.fromRGB(10, 50, 85), 0.35)
+
+	local folder = Instance.new("Folder")
+	folder.Name = "InfiniteSea"
+	folder.Parent = parent
+
+	local count = 0
+	local function fillRect(x0, x1, z0, z1)
+		local nx = math.max(1, math.ceil((x1 - x0) / TILE))
+		local nz = math.max(1, math.ceil((z1 - z0) / TILE))
+		local w, d = (x1 - x0) / nx, (z1 - z0) / nz
+		for i = 0, nx - 1 do
+			for j = 0, nz - 1 do
+				local p = Instance.new("Part")
+				p.Name = "SeaTile"
+				p.Anchored = true
+				p.CanCollide = false
+				p.CanQuery = false
+				p.CanTouch = false
+				p.CastShadow = false
+				p.Material = Enum.Material.SmoothPlastic
+				p.Color = water
+				p.Reflectance = 0.06
+				p.Size = Vector3.new(w + 1, 4, d + 1) -- 1 stud de sobreposição para não abrir frestas
+				p.Position = Vector3.new(center.X + x0 + w * (i + 0.5), top - 2, center.Z + z0 + d * (j + 0.5))
+				p.Parent = folder
+				count += 1
+			end
+		end
+	end
+
+	local outer = half + extent
+	fillRect(-outer, outer, -outer, -half) -- norte
+	fillRect(-outer, outer, half, outer)   -- sul
+	fillRect(-outer, -half, -half, half)   -- oeste
+	fillRect(half, outer, -half, half)     -- leste
+
+	-- neblina do horizonte (o cliente ajusta a cor conforme a hora: OceanAtmosphereClient)
+	local Lighting = game:GetService("Lighting")
+	Lighting.FogStart = C.FogStart
+	Lighting.FogEnd = C.FogEnd
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	if not atmosphere then
+		atmosphere = Instance.new("Atmosphere")
+		atmosphere.Parent = Lighting
+	end
+	atmosphere.Density = 0.26
+	atmosphere.Offset = 0.12
+	atmosphere.Haze = 1.4
+	atmosphere.Glare = 0.1
+	print(("[IslandGenerator] Mar infinito: %d planos de água."):format(count))
+end
+
+----------------------------------------------------------------------
 -- Ciclo de vida
 ----------------------------------------------------------------------
 function Generator.Init()
@@ -1195,7 +1296,13 @@ function Generator.Start()
 	Generator.EnsureTemplates(templates)
 
 	buildVolcano()
-	buildBridges()
+	local removedBridges = removeAllBridges(folders.Root)
+	if Cfg.Bridges and Cfg.Bridges.Enabled then
+		buildBridges()
+	else
+		print(("[IslandGenerator] Pontes removidas: %d"):format(removedBridges))
+	end
+	buildInfiniteSea(folders.Root)
 	placeWells()
 
 	local areaScale = (R / Cfg.BaseRadius) ^ 2 * Cfg.CountMultiplier

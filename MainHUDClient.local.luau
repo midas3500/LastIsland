@@ -1,11 +1,13 @@
 --[[
-	MainHUDClient (v2) - NOVA MOCHILA  (tipo: LocalScript)
+	MainHUDClient (v3) - MOCHILA  (tipo: LocalScript)
 	Local: o mesmo LocalScript "MainHUDClient" que você já tem (SUBSTITUA o conteúdo).
 	Se ele não estiver dentro de um ScreenGui, este script cria o próprio ScreenGui.
 
 	Recursos: grade de itens com abas e busca, painel de detalhes, soltar/descartar/comer,
 	aviso "+3 Madeira" ao coletar, barra de capacidade, MELHORIA DA MOCHILA gastando recursos
 	e melhoria de ferramentas (Machado/Picareta).
+	v3: botão COMER/BEBER (valores do NutritionConfig), barra de QUANTIDADE para soltar/descartar,
+	confirmação ao descartar quantidades maiores.
 	Tecla B abre/fecha. ESC fecha.
 
 	Remotes usados (os mesmos do seu jogo):
@@ -41,6 +43,8 @@ if not okBP then BackpackConfig = nil end
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local inventoryRemote = remotes:WaitForChild("UpdateInventory")
 local foodRemote = remotes:FindFirstChild("FoodRequest")
+local okNC, NC = pcall(function() return require(Modules:WaitForChild("NutritionConfig", 5)) end)
+if not okNC then NC = nil end
 local toolRequest = remotes:FindFirstChild("ToolUpgradeRequest")
 local toolUpdate = remotes:FindFirstChild("ToolUpgradeUpdate")
 local backpackRemote = remotes:WaitForChild("BackpackUpgrade", 8)
@@ -57,6 +61,7 @@ local filter = "Tudo"
 local search = ""
 local isOpen = false
 local statusText = ""
+local setQty -- (definida adiante)
 
 ----------------------------------------------------------------------
 -- Tema e helpers
@@ -210,11 +215,32 @@ local dIcon = label(dIconBg, { Size = UDim2.fromScale(1, 1), Text = "", TextSize
 local dName = label(detail, { Position = UDim2.fromOffset(92, 18), Size = UDim2.fromOffset(142, 24), Text = "Selecione um item", TextSize = 16, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd })
 local dCat = label(detail, { Position = UDim2.fromOffset(92, 44), Size = UDim2.fromOffset(142, 14), Text = "", TextSize = 11, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Left })
 local dCount = label(detail, { Position = UDim2.fromOffset(92, 60), Size = UDim2.fromOffset(142, 20), Text = "", TextSize = 14, Font = Enum.Font.GothamBold, TextColor3 = C.Accent, TextXAlignment = Enum.TextXAlignment.Left })
-local dDesc = label(detail, { Position = UDim2.fromOffset(16, 92), Size = UDim2.fromOffset(212, 90), Text = "", TextSize = 12, TextColor3 = C.Muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top })
-local dTag = label(detail, { Position = UDim2.fromOffset(16, 184), Size = UDim2.fromOffset(212, 18), Text = "", TextSize = 12, Font = Enum.Font.GothamBold, TextColor3 = C.Good, TextXAlignment = Enum.TextXAlignment.Left })
-local eatBtn = button(detail, { Position = UDim2.fromOffset(16, 214), Size = UDim2.fromOffset(212, 32), BackgroundColor3 = Color3.fromRGB(176, 120, 58), Text = "🥥  Comer  [F]", TextSize = 13, Visible = false })
-local dropBtn = button(detail, { Position = UDim2.fromOffset(16, 256), Size = UDim2.fromOffset(100, 34), BackgroundColor3 = Color3.fromRGB(52, 112, 168), Text = "Soltar 1", TextSize = 13 })
-local trashBtn = button(detail, { Position = UDim2.fromOffset(128, 256), Size = UDim2.fromOffset(100, 34), BackgroundColor3 = Color3.fromRGB(160, 62, 70), Text = "Descartar 1", TextSize = 13 })
+local dDesc = label(detail, { Position = UDim2.fromOffset(16, 86), Size = UDim2.fromOffset(212, 44), Text = "", TextSize = 11, TextColor3 = C.Muted, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top })
+local dTag = label(detail, { Position = UDim2.fromOffset(16, 132), Size = UDim2.fromOffset(212, 28), Text = "", TextSize = 11, Font = Enum.Font.GothamBold, TextColor3 = C.Good, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top })
+local useBtn = button(detail, { Position = UDim2.fromOffset(16, 164), Size = UDim2.fromOffset(212, 28), BackgroundColor3 = Color3.fromRGB(176, 120, 58), Text = "🍽️  Comer", TextSize = 13, Visible = false })
+
+-- quantidade (barra deslizante + atalhos)
+local qty = 1
+local qtyLabel = label(detail, { Position = UDim2.fromOffset(16, 198), Size = UDim2.fromOffset(212, 14), Text = "Quantidade: 1", TextSize = 11, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Left })
+local sliderTrack = new("Frame", { Position = UDim2.fromOffset(16, 218), Size = UDim2.fromOffset(212, 8), BackgroundColor3 = C.Slot, BorderSizePixel = 0 }, detail)
+corner(sliderTrack, 4)
+local sliderFill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.Accent, BorderSizePixel = 0 }, sliderTrack)
+corner(sliderFill, 4)
+local sliderKnob = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, sliderTrack)
+corner(sliderKnob, 8)
+stroke(sliderKnob, 0.2, C.Accent)
+local sliderHit = new("TextButton", { Position = UDim2.fromOffset(8, 210), Size = UDim2.fromOffset(228, 24), BackgroundTransparency = 1, Text = "", AutoButtonColor = false }, detail)
+sliderHit:SetAttribute("NoFx", true)
+
+local presetButtons = {}
+local PRESETS = { 1, 5, 10, "Máx" }
+for i, v in PRESETS do
+	local b = button(detail, { Position = UDim2.fromOffset(16 + (i - 1) * 54, 238), Size = UDim2.fromOffset(48, 22), BackgroundColor3 = C.Slot, Text = tostring(v), TextSize = 11 })
+	presetButtons[i] = { Button = b, Value = v }
+end
+
+local dropBtn = button(detail, { Position = UDim2.fromOffset(16, 268), Size = UDim2.fromOffset(100, 32), BackgroundColor3 = Color3.fromRGB(52, 112, 168), Text = "Soltar 1", TextSize = 12 })
+local trashBtn = button(detail, { Position = UDim2.fromOffset(128, 268), Size = UDim2.fromOffset(100, 32), BackgroundColor3 = Color3.fromRGB(160, 62, 70), Text = "Descartar 1", TextSize = 12 })
 
 -- rodapé: melhorias
 local footer = new("Frame", { Position = UDim2.fromOffset(20, 392), Size = UDim2.fromOffset(760, 156), BackgroundTransparency = 1 }, window)
@@ -255,6 +281,20 @@ local searchBox = new("TextBox", {
 }, toolbar)
 corner(searchBox, 9)
 stroke(searchBox, 0.8)
+
+----------------------------------------------------------------------
+-- Confirmação de descarte
+----------------------------------------------------------------------
+local CONFIRM_THRESHOLD = 5 -- descartar esta quantidade ou mais pede confirmação
+local confirmOverlay = new("Frame", { Visible = false, ZIndex = 50, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, BorderSizePixel = 0, Active = true }, window)
+local confirmBox = new("Frame", { ZIndex = 51, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(340, 160), BackgroundColor3 = C.Window, BorderSizePixel = 0 }, confirmOverlay)
+corner(confirmBox, 14)
+stroke(confirmBox, 0.4, C.Bad)
+local confirmTitle = label(confirmBox, { ZIndex = 52, Position = UDim2.fromOffset(16, 14), Size = UDim2.fromOffset(308, 24), Text = "Descartar item?", TextSize = 17, Font = Enum.Font.GothamBold })
+local confirmText = label(confirmBox, { ZIndex = 52, Position = UDim2.fromOffset(16, 44), Size = UDim2.fromOffset(308, 54), Text = "", TextSize = 13, TextColor3 = C.Muted, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top })
+local confirmYes = button(confirmBox, { ZIndex = 52, Position = UDim2.fromOffset(16, 108), Size = UDim2.fromOffset(148, 36), BackgroundColor3 = Color3.fromRGB(176, 58, 66), Text = "Descartar", TextSize = 14 })
+local confirmNo = button(confirmBox, { ZIndex = 52, Position = UDim2.fromOffset(176, 108), Size = UDim2.fromOffset(148, 36), BackgroundColor3 = C.Slot, Text = "Cancelar", TextSize = 14 })
+local pendingTrash = nil
 
 ----------------------------------------------------------------------
 -- Avisos "+3 Madeira"
@@ -303,13 +343,33 @@ local function sortedItems()
 	return list
 end
 
+setQty = function(n)
+	local maxCount = selected and math.max(1, countOf(selected)) or 1
+	qty = math.clamp(math.floor(n + 0.5), 1, maxCount)
+	local fraction = maxCount > 1 and (qty - 1) / (maxCount - 1) or 1
+	sliderFill.Size = UDim2.fromScale(fraction, 1)
+	sliderKnob.Position = UDim2.fromScale(fraction, 0.5)
+	qtyLabel.Text = string.format("Quantidade: %d / %d", qty, maxCount)
+	dropBtn.Text = "Soltar " .. qty
+	trashBtn.Text = "Descartar " .. qty
+	for _, p in presetButtons do
+		local value = (p.Value == "Máx") and maxCount or p.Value
+		local usable = value <= maxCount
+		p.Button.BackgroundColor3 = (usable and value == qty) and C.Accent or C.Slot
+		p.Button.TextColor3 = (usable and value == qty) and Color3.fromRGB(10, 20, 30) or (usable and Color3.new(1, 1, 1) or C.Muted)
+		p.Button.BackgroundTransparency = usable and 0 or 0.5
+	end
+end
+
 local function refreshDetail()
 	if selected and countOf(selected) <= 0 then selected = nil end
 	if not selected then
 		dIcon.Text, dName.Text, dCat.Text, dCount.Text, dDesc.Text, dTag.Text = "", "Selecione um item", "", "", "Toque em um item da mochila para ver detalhes.", ""
 		dIconStroke.Color = C.Muted
-		eatBtn.Visible = false
+		useBtn.Visible = false
 		dropBtn.Visible, trashBtn.Visible = false, false
+		qtyLabel.Visible, sliderTrack.Visible, sliderHit.Visible = false, false, false
+		for _, p in presetButtons do p.Button.Visible = false end
 		return
 	end
 	local d = defOf(selected)
@@ -320,11 +380,26 @@ local function refreshDetail()
 	dDesc.Text = (d and d.Description) or ""
 	dIconStroke.Color = colorOf(selected)
 	local tag = ""
-	if d and d.HungerRestore then tag = "🍖 +" .. d.HungerRestore .. " de fome" end
-	if d and d.HealRestore then tag = "❤️ +" .. d.HealRestore .. " de vida" end
+	local consumable = NC and NC.Consumables[selected]
+	if consumable then
+		local parts = {}
+		if (consumable.Hunger or 0) > 0 then table.insert(parts, "🍖 +" .. consumable.Hunger) end
+		if (consumable.Saturation or 0) > 0 then table.insert(parts, "🥣 +" .. consumable.Saturation) end
+		if (consumable.Water or 0) > 0 then table.insert(parts, "💧 +" .. consumable.Water) end
+		if (consumable.Health or 0) > 0 then table.insert(parts, "❤️ +" .. consumable.Health) end
+		if (consumable.Stamina or 0) > 0 then table.insert(parts, "⚡ +" .. consumable.Stamina) end
+		tag = table.concat(parts, "  ")
+		if consumable.RandomEffects then tag ..= "\n⚠️ Pode causar efeitos aleatórios" end
+		useBtn.Text = (consumable.Action == "Drink") and "🥤  Beber" or "🍽️  Comer"
+		useBtn.Visible = true
+	else
+		useBtn.Visible = false
+	end
 	dTag.Text = tag
-	eatBtn.Visible = (selected == "Coconut")
 	dropBtn.Visible, trashBtn.Visible = true, true
+	qtyLabel.Visible, sliderTrack.Visible, sliderHit.Visible = true, true, true
+	for _, p in presetButtons do p.Button.Visible = true end
+	setQty(qty)
 end
 
 local function rebuildGrid()
@@ -349,6 +424,7 @@ local function rebuildGrid()
 		badge.BackgroundColor3 = C.Window
 		corner(badge, 8)
 		slot.Activated:Connect(function()
+			if selected ~= id then qty = 1 end
 			selected = id
 			rebuildGrid()
 			refreshDetail()
@@ -468,15 +544,66 @@ end)
 ----------------------------------------------------------------------
 -- Ações
 ----------------------------------------------------------------------
+useBtn.Activated:Connect(function()
+	if selected and NC and NC.Consumables[selected] and foodRemote then
+		foodRemote:FireServer("Consume", selected)
+	end
+end)
 dropBtn.Activated:Connect(function()
-	if selected then inventoryRemote:FireServer("Drop", selected) end
+	if selected then inventoryRemote:FireServer("Drop", selected, qty) end
 end)
 trashBtn.Activated:Connect(function()
-	if selected then inventoryRemote:FireServer("Trash", selected) end
+	if not selected then return end
+	if qty >= CONFIRM_THRESHOLD then
+		pendingTrash = { Item = selected, Amount = qty }
+		confirmText.Text = string.format("Remover %d× %s %s da mochila para sempre?\nEsta ação não pode ser desfeita.", qty, iconOf(selected), nameOf(selected))
+		confirmOverlay.Visible = true
+	else
+		inventoryRemote:FireServer("Trash", selected, qty)
+	end
 end)
-eatBtn.Activated:Connect(function()
-	if foodRemote then foodRemote:FireServer("EatCoconut") end
+confirmYes.Activated:Connect(function()
+	if pendingTrash then
+		inventoryRemote:FireServer("Trash", pendingTrash.Item, pendingTrash.Amount)
+	end
+	pendingTrash = nil
+	confirmOverlay.Visible = false
 end)
+confirmNo.Activated:Connect(function()
+	pendingTrash = nil
+	confirmOverlay.Visible = false
+end)
+
+-- barra deslizante
+local dragging = false
+local function setFromX(x)
+	local maxCount = selected and math.max(1, countOf(selected)) or 1
+	local fraction = math.clamp((x - sliderTrack.AbsolutePosition.X) / math.max(1, sliderTrack.AbsoluteSize.X), 0, 1)
+	setQty(1 + fraction * (maxCount - 1))
+end
+sliderHit.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		setFromX(input.Position.X)
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		setFromX(input.Position.X)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+for _, p in presetButtons do
+	p.Button.Activated:Connect(function()
+		if not selected then return end
+		local maxCount = math.max(1, countOf(selected))
+		setQty((p.Value == "Máx") and maxCount or math.min(p.Value, maxCount))
+	end)
+end
 upgradeBtn.Activated:Connect(function()
 	if backpackRemote then backpackRemote:FireServer("Upgrade") end
 end)
@@ -512,7 +639,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.B then
 		setOpen(not isOpen)
 	elseif input.KeyCode == Enum.KeyCode.Escape and isOpen then
-		setOpen(false)
+		if confirmOverlay.Visible then
+			confirmOverlay.Visible = false
+			pendingTrash = nil
+		else
+			setOpen(false)
+		end
 	end
 end)
 
@@ -521,12 +653,20 @@ end)
 ----------------------------------------------------------------------
 inventoryRemote.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" then return end
-	local newItems = data.Items or {}
+	if data.Notice then toast(data.Notice, C.Warn) end
+	if type(data.Items) ~= "table" then return end
+	local newItems = data.Items
 	if previousItems then
 		for id, count in newItems do
 			local gained = count - (previousItems[id] or 0)
 			if gained > 0 then
 				toast(string.format("+%d %s %s", gained, iconOf(id), nameOf(id)), C.Good)
+			end
+		end
+		for id, count in previousItems do
+			local lost = count - (newItems[id] or 0)
+			if lost > 0 then
+				toast(string.format("-%d %s %s", lost, iconOf(id), nameOf(id)), C.Muted)
 			end
 		end
 	end
@@ -535,6 +675,23 @@ inventoryRemote.OnClientEvent:Connect(function(data)
 	if type(data.Capacity) == "number" then capacity = data.Capacity end
 	refreshAll()
 end)
+
+-- comer / beber (respostas do servidor)
+if foodRemote then
+	foodRemote.OnClientEvent:Connect(function(kind, itemId, a, b)
+		if kind == "Consumed" then
+			if b == "Energy" then
+				toast("⚡ Energia! Você se sente mais rápido.", C.Good)
+			elseif b == "Nausea" then
+				toast("🤢 Você ficou enjoado...", C.Warn)
+			elseif b == "Poison" then
+				toast("☠️ Envenenado!", C.Bad)
+			end
+		elseif kind == "Denied" then
+			toast(a or "Não foi possível.", C.Warn)
+		end
+	end)
+end
 
 if backpackRemote then
 	backpackRemote.OnClientEvent:Connect(function(kind, a, b)
@@ -565,3 +722,4 @@ refreshAll()
 inventoryRemote:FireServer("Request")
 if backpackRemote then backpackRemote:FireServer("Request") end
 if toolRequest then toolRequest:FireServer("Request") end
+

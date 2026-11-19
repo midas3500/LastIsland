@@ -180,8 +180,8 @@ Additions.Items.Obsidian = {
 	MaxStack = 999, Order = 17, Color = Color3.fromRGB(40, 34, 56),
 }
 Additions.Items.Mushroom = {
-	DisplayName = "Cogumelo", Emoji = "🍄",
-	Description = "Cogumelo da floresta. Recupera 8 pontos de fome.",
+	DisplayName = "Cogumelo Marrom", Emoji = "🍄",
+	Description = "Cogumelo comum da floresta. Quase sempre seguro.",
 	MaxStack = 999, Order = 18, Color = Color3.fromRGB(200, 60, 50),
 	Food = true, HungerRestore = 8,
 }
@@ -197,9 +197,37 @@ Additions.Items.Shell = {
 }
 Additions.Items.Honey = {
 	DisplayName = "Mel", Emoji = "🍯",
-	Description = "Mel doce e nutritivo. Recupera 20 pontos de fome.",
+	Description = "Mel doce e nutritivo.",
 	MaxStack = 999, Order = 21, Color = Color3.fromRGB(222, 170, 60),
 	Food = true, HungerRestore = 20,
+}
+
+Additions.Items.MushroomRed = {
+	DisplayName = "Cogumelo Vermelho", Emoji = "🍄",
+	Description = "Chamativo e perigoso. Pode envenenar... ou não.",
+	MaxStack = 999, Order = 22, Color = Color3.fromRGB(215, 50, 50),
+	Food = true,
+}
+Additions.Items.MushroomBlue = {
+	DisplayName = "Cogumelo Azul", Emoji = "🍄",
+	Description = "Brilha no escuro. Costuma dar muita energia.",
+	MaxStack = 999, Order = 23, Color = Color3.fromRGB(90, 160, 255),
+	Food = true,
+}
+
+Additions.Nodes.MushroomRed = {
+	DisplayName = "Cogumelos Vermelhos", Template = "MushroomRed", ActionText = "Colher", ActionLabel = "Colhendo cogumelos...",
+	Tool = nil, MinTier = 1, GatherTime = 1.6, RespawnTime = 90, MaxDistance = 10,
+	Rewards = { { Item = "MushroomRed", Min = 1, Max = 3 } },
+	ShakeDegrees = 2, HitHeight = 0.8, PromptHeight = 1.2,
+	Particle = particle(Color3.fromRGB(215, 50, 50), 5, 0.3, 6),
+}
+Additions.Nodes.MushroomBlue = {
+	DisplayName = "Cogumelos Azuis", Template = "MushroomBlue", ActionText = "Colher", ActionLabel = "Colhendo cogumelos...",
+	Tool = nil, MinTier = 1, GatherTime = 1.8, RespawnTime = 120, MaxDistance = 10,
+	Rewards = { { Item = "MushroomBlue", Min = 1, Max = 2 } },
+	ShakeDegrees = 2, HitHeight = 0.8, PromptHeight = 1.2,
+	Particle = particle(Color3.fromRGB(90, 160, 255), 5, 0.3, 6),
 }
 
 Additions.Nodes.Mushroom = {
@@ -275,7 +303,7 @@ Additions.Nodes.ObsidianRock = {
 local ISLAND_NODES = {
 	"Tree", "OakTree", "PineTree", "AppleTree", "BananaTree", "IronwoodTree",
 	"Bush", "BerryBush", "HerbBush", "Rock", "OreIron", "OreGold", "OreCoal", "Driftwood",
-	"Mushroom", "ClayDeposit", "ShellPile", "Beehive", "OreCopper", "OreCrystal", "SulfurVent", "ObsidianRock",
+	"Mushroom", "MushroomRed", "MushroomBlue", "ClayDeposit", "ShellPile", "Beehive", "OreCopper", "OreCrystal", "SulfurVent", "ObsidianRock",
 }
 
 return function(ResourceConfig)
@@ -299,4 +327,3 @@ return function(ResourceConfig)
 	end
 end
 
-	

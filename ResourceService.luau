@@ -800,7 +800,30 @@ function ResourceService.RemoveNode(model)
 	model:Destroy()
 end
 
+
 function ResourceService.Init()
+	function ResourceService.SpawnAtMarker(marker)
+		local templates = ServerStorage:FindFirstChild("ResourceModels")
+		if not templates then return nil end
+		local before = #nodeList
+		if createNode(marker, templates) and #nodeList > before then
+			return nodeList[#nodeList].Model
+		end
+		return nil
+	end
+
+	function ResourceService.RemoveNode(model)
+		local record = nodes[model]
+		if not record then return end
+		record.State = "Removed"
+		record.RespawnToken = nil
+		if record.Prompt then record.Prompt.Enabled = false end
+		nodes[model] = nil
+		for i, r in ipairs(nodeList) do
+			if r == record then table.remove(nodeList, i) break end
+		end
+		model:Destroy()
+	end
 end
 
 -- INICIALIZAÇÃO
@@ -822,9 +845,7 @@ function ResourceService.Start()
 
 	-- TEMPLATES DOS RECURSOS DA ILHA
 	local okGen, IslandGenerator = pcall(require, script.Parent:WaitForChild("IslandGenerator"))
-	if okGen then
-		IslandGenerator.EnsureTemplates(templates)
-	end
+	if okGen then IslandGenerator.EnsureTemplates(templates) end
 
 	log(created, "modelo(s) de recurso criado(s).")
 

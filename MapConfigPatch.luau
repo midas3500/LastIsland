@@ -11,8 +11,8 @@
 	  - ilhas dos jogadores mais longe (IslandGenConfig.World.BridgeGap de mar entre as costas)
 	  - lobby e oceano reposicionados/aumentados para tudo caber
 	  - mar mais fundo (IslandGenConfig.World.OceanDepth)
-	  - desliga as pontes, a ilha low-poly e o FAROL de torre vermelha do MapService
-	    (o IslandGenerator constrói a ilha nova e as pontes novas, sem torre)
+	  - ilhas dos jogadores e lobby maiores
+	  - remove TODAS as pontes e desliga a ilha low-poly e o FAROL de torre vermelha do MapService
 ]]
 
 return function(MapConfig)
@@ -28,6 +28,23 @@ return function(MapConfig)
 		local first = cfg.Tiers and cfg.Tiers[1]
 		return cfg.Radius * ((first and first.Scale) or 1)
 	end
+
+	-- Ilhas dos jogadores maiores (raio, área de construção e quantidade de recursos)
+	local k = G.World.PlayerIslandScale or 1
+	if k ~= 1 then
+		pl.Radius = pl.Radius * k
+		if type(pl.BuildRadius) == "number" then pl.BuildRadius = pl.BuildRadius * k end
+		local counts = MapConfig.ResourceMarkers and MapConfig.ResourceMarkers.Counts
+		if type(counts) == "table" then
+			for name, value in counts do
+				if type(value) == "number" then
+					counts[name] = math.ceil(value * k * k * 0.8)
+				end
+			end
+		end
+	end
+	local lk = G.World.LobbyScale or 1
+	if lk ~= 1 then lobby.Radius = lobby.Radius * lk end
 
 	-- Ilha central (a costa irregular chega a ~1.3x o raio)
 	main.Radius = G.Map.Radius
@@ -53,7 +70,7 @@ return function(MapConfig)
 	local needed = math.max(pl.RingRadius + plOuter, lobbyDist + lobbyOuter) + G.World.OceanMargin
 	ocean.Size = math.max(ocean.Size, math.ceil(needed * 2 / 256) * 256)
 
-	-- As pontes agora são do IslandGenerator (chegam na praia de verdade)
+	-- Sem pontes: o mapa todo é atravessado nadando (ou de barco, no futuro)
 	MapConfig.Bridges.PlayerIslandsToMain = false
 	MapConfig.Bridges.LobbyToMain = false
 end

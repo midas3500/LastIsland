@@ -1,13 +1,11 @@
 --[[
-	SurvivalHUD (v2)  (tipo: LocalScript)
-	Local: StarterPlayer > StarterPlayerScripts > SurvivalHUD   (SUBSTITUI o atual)
+	SurvivalHUD (v3)  (tipo: LocalScript)
+	Local: StarterPlayer > StarterPlayerScripts > SurvivalHUD   (SUBSTITUI o anterior)
 
-	Interface de vida, fome, stamina (e sede, quando existir), horário e botões.
-	Usa os MESMOS dados do seu jogo:
-	  Player attributes: Hunger, MaxHunger, Stamina, MaxStamina  (opcional: Thirst, MaxThirst)
-	  Lighting attributes: WorldClockTime, DayNumber
-	  Remotes: SprintRequest, FoodRequest("EatCoconut")
-	Controles: SHIFT = correr | F = comer coco
+	Canto inferior esquerdo, compacto: VIDA, FOME (com linha de saciedade), STAMINA e SEDE.
+	Ícones de efeitos (energia, náusea, veneno), transições nos níveis críticos e relógio.
+	O botão de comer coco FOI REMOVIDO: agora se come/bebe pela mochila (tecla B).
+	Controles: SHIFT = correr (botão 🏃 só aparece em celular/tablet)
 ]]
 
 local Players = game:GetService("Players")
@@ -15,12 +13,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local sprintRemote = remotes:WaitForChild("SprintRequest")
-local foodRemote = remotes:WaitForChild("FoodRequest")
 local playerGui = player:WaitForChild("PlayerGui")
 
 local old = playerGui:FindFirstChild("SurvivalHUD")
@@ -67,69 +65,83 @@ local function card(parent, props)
 	return f
 end
 
-local function sequence(a, b)
-	return ColorSequence.new(a, b)
-end
+local function sequence(a, b) return ColorSequence.new(a, b) end
 
-local viewScale = math.clamp(Workspace.CurrentCamera.ViewportSize.X / 1000, 0.72, 1)
+local viewScale = math.clamp(Workspace.CurrentCamera.ViewportSize.X / 1100, 0.7, 1)
 
 ----------------------------------------------------------------------
--- Painel de status (canto inferior esquerdo)
+-- Vinheta de estados críticos (bordas da tela)
+----------------------------------------------------------------------
+local vignette = new("Frame", { Name = "Vignette", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Active = false, ZIndex = 0 }, gui)
+local vignetteEdges = {}
+local EDGES = {
+	{ Pos = UDim2.fromScale(0, 0), Size = UDim2.new(1, 0, 0.22, 0), Rot = 90 },     -- topo
+	{ Pos = UDim2.fromScale(0, 0.78), Size = UDim2.new(1, 0, 0.22, 0), Rot = 270 }, -- base
+	{ Pos = UDim2.fromScale(0, 0), Size = UDim2.new(0.14, 0, 1, 0), Rot = 0 },      -- esquerda
+	{ Pos = UDim2.fromScale(0.86, 0), Size = UDim2.new(0.14, 0, 1, 0), Rot = 180 }, -- direita
+}
+for _, e in EDGES do
+	local f = new("Frame", { Position = e.Pos, Size = e.Size, BackgroundColor3 = Color3.new(1, 0, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Active = false }, vignette)
+	new("UIGradient", { Rotation = e.Rot, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }) }, f)
+	table.insert(vignetteEdges, f)
+end
+local vignetteAlpha, vignetteColor = 1, Color3.new(1, 0, 0)
+
+----------------------------------------------------------------------
+-- Painel de status (canto inferior esquerdo, compacto)
 ----------------------------------------------------------------------
 local panel = card(gui, {
 	Name = "StatusPanel",
 	AnchorPoint = Vector2.new(0, 1),
-	Position = UDim2.new(0, 16, 1, -16),
-	Size = UDim2.fromOffset(300, 0),
+	Position = UDim2.new(0, 12, 1, -12),
+	Size = UDim2.fromOffset(196, 0),
 	AutomaticSize = Enum.AutomaticSize.Y,
 })
-new("UIScale", { Scale = viewScale }, panel).Parent = panel
-new("UIPadding", { PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12), PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14) }, panel)
-new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, panel)
+new("UIScale", { Scale = viewScale }, panel)
+new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, panel)
+new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, panel)
 
 local BAR_DEFS = {
-	{ Key = "Health",  Title = "VIDA",    Icon = "❤️", Colors = { Color3.fromRGB(255, 120, 120), Color3.fromRGB(226, 62, 84) } },
-	{ Key = "Hunger",  Title = "FOME",    Icon = "🍖", Colors = { Color3.fromRGB(255, 208, 100), Color3.fromRGB(240, 142, 52) }, Attr = "Hunger", MaxAttr = "MaxHunger" },
-	{ Key = "Stamina", Title = "STAMINA", Icon = "⚡", Colors = { Color3.fromRGB(120, 240, 170), Color3.fromRGB(52, 188, 132) }, Attr = "Stamina", MaxAttr = "MaxStamina" },
-	{ Key = "Thirst",  Title = "SEDE",    Icon = "💧", Colors = { Color3.fromRGB(130, 206, 255), Color3.fromRGB(62, 140, 232) }, Attr = "Thirst", MaxAttr = "MaxThirst", Optional = true },
+	{ Key = "Health",  Icon = "❤️", Colors = { Color3.fromRGB(255, 120, 120), Color3.fromRGB(226, 62, 84) } },
+	{ Key = "Hunger",  Icon = "🍖", Colors = { Color3.fromRGB(255, 208, 100), Color3.fromRGB(240, 142, 52) }, Attr = "Hunger", MaxAttr = "MaxHunger", HasSaturation = true },
+	{ Key = "Stamina", Icon = "⚡", Colors = { Color3.fromRGB(120, 240, 170), Color3.fromRGB(52, 188, 132) }, Attr = "Stamina", MaxAttr = "MaxStamina" },
+	{ Key = "Thirst",  Icon = "💧", Colors = { Color3.fromRGB(130, 206, 255), Color3.fromRGB(62, 140, 232) }, Attr = "Thirst", MaxAttr = "MaxThirst" },
 }
 local LOW_COLORS = { Color3.fromRGB(255, 120, 110), Color3.fromRGB(205, 44, 60) }
 
 local bars = {}
 
 local function createBar(def, order)
-	local row = new("Frame", { Name = def.Key, Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, LayoutOrder = order }, panel)
+	local row = new("Frame", { Name = def.Key, Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, LayoutOrder = order }, panel)
+	local rowScale = new("UIScale", { Scale = 1 }, row)
 	local icon = new("TextLabel", {
-		Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(0, 5), BackgroundTransparency = 1,
-		Text = def.Icon, TextSize = 21, Font = Enum.Font.GothamBold, TextColor3 = C.Text,
+		Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1, Text = def.Icon, TextSize = 15,
+		Font = Enum.Font.GothamBold, TextColor3 = C.Text,
 	}, row)
-	new("TextLabel", {
-		Size = UDim2.new(0.5, -34, 0, 16), Position = UDim2.fromOffset(36, 0), BackgroundTransparency = 1,
-		Text = def.Title, TextSize = 11, Font = Enum.Font.GothamBold, TextColor3 = C.Muted, TextXAlignment = Enum.TextXAlignment.Left,
-	}, row)
-	local value = new("TextLabel", {
-		Size = UDim2.new(0.5, 0, 0, 16), Position = UDim2.new(0.5, 0, 0, 0), BackgroundTransparency = 1,
-		Text = "0/0", TextSize = 12, Font = Enum.Font.GothamBold, TextColor3 = C.Text, TextXAlignment = Enum.TextXAlignment.Right,
-	}, row)
-
 	local track = new("Frame", {
-		Position = UDim2.fromOffset(36, 21), Size = UDim2.new(1, -36, 0, 12), BackgroundColor3 = C.Track,
+		Position = UDim2.fromOffset(24, 3), Size = UDim2.new(1, -24, 0, 14), BackgroundColor3 = C.Track,
 		BorderSizePixel = 0, ClipsDescendants = true,
 	}, row)
-	corner(track, 6)
-
+	corner(track, 7)
 	local ghost = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.7, BorderSizePixel = 0 }, track)
-	corner(ghost, 6)
-
+	corner(ghost, 7)
 	local fill = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, track)
-	corner(fill, 6)
+	corner(fill, 7)
 	local grad = new("UIGradient", { Color = sequence(def.Colors[1], def.Colors[2]), Rotation = 90 }, fill)
-	local shine = new("Frame", { Size = UDim2.fromScale(1, 0.45), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.8, BorderSizePixel = 0 }, fill)
-	corner(shine, 6)
+	new("Frame", { Size = UDim2.fromScale(1, 0.45), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.82, BorderSizePixel = 0 }, fill)
+	local satLine
+	if def.HasSaturation then
+		satLine = new("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(0, 0, 0, 3), BackgroundColor3 = Color3.fromRGB(255, 232, 130), BorderSizePixel = 0 }, track)
+		corner(satLine, 2)
+	end
+	local value = new("TextLabel", {
+		Size = UDim2.new(1, -5, 1, 0), BackgroundTransparency = 1, Text = "", TextSize = 10, Font = Enum.Font.GothamBold,
+		TextColor3 = C.Text, TextStrokeTransparency = 0.6, TextXAlignment = Enum.TextXAlignment.Right,
+	}, track)
 
 	local bar = {
-		Def = def, Row = row, Icon = icon, Value = value, Fill = fill, Ghost = ghost, Grad = grad,
-		Disp = 1, GhostDisp = 1, Target = 1, Low = false,
+		Def = def, Row = row, RowScale = rowScale, Icon = icon, Value = value, Fill = fill, Ghost = ghost,
+		Grad = grad, SatLine = satLine, Disp = 1, GhostDisp = 1, Level = 0, Low = false,
 	}
 	bars[def.Key] = bar
 	return bar
@@ -137,53 +149,56 @@ end
 
 for i, def in BAR_DEFS do createBar(def, i) end
 
-----------------------------------------------------------------------
--- Botões (comer / correr)
-----------------------------------------------------------------------
-local buttonRow = new("Frame", { Name = "Buttons", Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, LayoutOrder = 10 }, panel)
-new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, buttonRow)
+-- ícones de efeitos ativos
+local effectRow = new("Frame", { Name = "Effects", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, LayoutOrder = 20 }, panel)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, effectRow)
 
-local function createButton(name, text, color, order)
-	local b = new("TextButton", {
-		Name = name, Size = UDim2.new(0.5, -4, 1, 0), BackgroundColor3 = color, BorderSizePixel = 0,
-		Text = text, TextColor3 = Color3.new(1, 1, 1), TextSize = 13, Font = Enum.Font.GothamBold,
-		AutoButtonColor = false, LayoutOrder = order,
-	}, buttonRow)
-	corner(b, 10)
-	new("UIGradient", { Rotation = 90, Color = sequence(Color3.new(1, 1, 1), Color3.fromRGB(205, 205, 205)) }, b)
-	new("UIStroke", { Color = Color3.new(1, 1, 1), Transparency = 0.82, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, b)
-	return b
+local EFFECTS = {
+	{ Key = "Energy", Attr = "FxEnergyEnd", Emoji = "⚡", Color = Color3.fromRGB(110, 235, 160) },
+	{ Key = "Nausea", Attr = "FxNauseaEnd", Emoji = "🤢", Color = Color3.fromRGB(190, 220, 90) },
+	{ Key = "Poison", Attr = "FxPoisonEnd", Emoji = "☠️", Color = Color3.fromRGB(180, 110, 230) },
+}
+local effectChips = {}
+for i, e in EFFECTS do
+	local chip = new("Frame", { LayoutOrder = i, Size = UDim2.fromOffset(44, 20), BackgroundColor3 = C.Track, BorderSizePixel = 0, Visible = false }, effectRow)
+	corner(chip, 8)
+	new("UIStroke", { Color = e.Color, Transparency = 0.2, Thickness = 1.2 }, chip)
+	new("TextLabel", { Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1, Text = e.Emoji, TextSize = 13, Font = Enum.Font.GothamBold }, chip)
+	local timeLabel = new("TextLabel", { Position = UDim2.fromOffset(20, 0), Size = UDim2.fromOffset(22, 20), BackgroundTransparency = 1, Text = "", TextSize = 10, Font = Enum.Font.GothamBold, TextColor3 = e.Color }, chip)
+	effectChips[e.Key] = { Chip = chip, Label = timeLabel }
 end
 
-local eatButton = createButton("EatButton", "🥥  Comer  [F]", Color3.fromRGB(176, 120, 58), 1)
-local sprintButton = createButton("SprintButton", "🏃  Correr  [Shift]", Color3.fromRGB(46, 128, 92), 2)
-
+----------------------------------------------------------------------
+-- Correr (Shift; botão só em celular/tablet)
+----------------------------------------------------------------------
 local keyboardSprint, mobileSprint = false, false
+local sprintButton
 
 local function refreshSprint()
 	sprintRemote:FireServer(keyboardSprint or mobileSprint)
-	local on = keyboardSprint or mobileSprint
-	sprintButton.BackgroundColor3 = on and Color3.fromRGB(70, 180, 130) or Color3.fromRGB(46, 128, 92)
-	sprintButton.Text = on and "🏃  Correndo..." or "🏃  Correr  [Shift]"
+	if sprintButton then
+		local on = keyboardSprint or mobileSprint
+		sprintButton.BackgroundColor3 = on and Color3.fromRGB(70, 180, 130) or Color3.fromRGB(46, 128, 92)
+	end
 end
 
-local function eat()
-	foodRemote:FireServer("EatCoconut")
+if UserInputService.TouchEnabled then
+	sprintButton = new("TextButton", {
+		Name = "SprintButton", AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 220, 1, -12), Size = UDim2.fromOffset(48, 48),
+		BackgroundColor3 = Color3.fromRGB(46, 128, 92), Text = "🏃", TextSize = 24, AutoButtonColor = false, BorderSizePixel = 0,
+	}, gui)
+	corner(sprintButton, 24)
+	sprintButton.Activated:Connect(function()
+		mobileSprint = not mobileSprint
+		refreshSprint()
+	end)
 end
-
-eatButton.Activated:Connect(eat)
-sprintButton.Activated:Connect(function()
-	mobileSprint = not mobileSprint
-	refreshSprint()
-end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		keyboardSprint = true
 		refreshSprint()
-	elseif input.KeyCode == Enum.KeyCode.F then
-		eat()
 	end
 end)
 UserInputService.InputEnded:Connect(function(input)
@@ -267,7 +282,7 @@ Lighting:GetPropertyChangedSignal("ClockTime"):Connect(updateClock)
 updateClock()
 
 ----------------------------------------------------------------------
--- Atualização das barras (animação suave)
+-- Atualização das barras, efeitos e vinheta (animação suave)
 ----------------------------------------------------------------------
 local function readStat(key)
 	local def = bars[key].Def
@@ -282,45 +297,134 @@ local function readStat(key)
 	return value, player:GetAttribute(def.MaxAttr) or 100
 end
 
+-- efeitos de tela (náusea / veneno)
+local colorFx = new("ColorCorrectionEffect", { Name = "SurvivalFx", Enabled = false }, Lighting)
+local blurFx = new("BlurEffect", { Name = "SurvivalBlur", Size = 0, Enabled = false }, Lighting)
+local nauseaAmount, poisonAmount = 0, 0
+
+RunService:BindToRenderStep("SurvivalNauseaWobble", Enum.RenderPriority.Camera.Value + 1, function()
+	if nauseaAmount > 0.02 then
+		local camera = Workspace.CurrentCamera
+		if camera then
+			local t = os.clock()
+			camera.CFrame *= CFrame.Angles(0, 0, math.rad(math.sin(t * 1.7) * 1.6 * nauseaAmount))
+		end
+	end
+end)
+
+local function pulseRow(bar, strength)
+	bar.RowScale.Scale = 1 + strength
+	TweenService:Create(bar.RowScale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+end
+
+local pcts = {}
+
 RunService.RenderStepped:Connect(function(dt)
 	local now = os.clock()
+	local serverNow = Workspace:GetServerTimeNow()
+
+	-- barras
 	for key, bar in bars do
 		local value, maximum = readStat(key)
-		if bar.Def.Optional then
-			bar.Row.Visible = value ~= nil
-		end
 		if value ~= nil then
 			local pct = maximum > 0 and math.clamp(value / maximum, 0, 1) or 0
-			bar.Target = pct
-			bar.Value.Text = string.format("%d/%d", math.floor(value + 0.5), math.floor(maximum + 0.5))
+			pcts[key] = pct
+			bar.Value.Text = tostring(math.floor(value + 0.5))
 
 			bar.Disp += (pct - bar.Disp) * (1 - math.exp(-dt * 9))
 			if bar.GhostDisp < bar.Disp then
-				bar.GhostDisp = bar.Disp -- o rastro nunca fica atrás ao subir
+				bar.GhostDisp = bar.Disp
 			else
-				-- desce devagar
 				bar.GhostDisp += (bar.Disp - bar.GhostDisp) * (1 - math.exp(-dt * 1.6))
 			end
 			bar.Fill.Size = UDim2.fromScale(bar.Disp, 1)
 			bar.Ghost.Size = UDim2.fromScale(bar.GhostDisp, 1)
 
-			local low = pct < 0.2
-			if low ~= bar.Low then
-				bar.Low = low
-				local colors = low and LOW_COLORS or bar.Def.Colors
+			if bar.SatLine then
+				local sat = player:GetAttribute("Saturation") or 0
+				local maxSat = player:GetAttribute("MaxSaturation") or 100
+				local target = math.clamp(sat / maxSat, 0, 1)
+				local current = bar.SatLine.Size.X.Scale
+				bar.SatLine.Size = UDim2.new(current + (target - current) * (1 - math.exp(-dt * 6)), 0, 0, 3)
+			end
+
+			-- níveis críticos: 0 normal, 1 baixo (<25%), 2 crítico (<10%)
+			local level = pct < 0.10 and 2 or (pct < 0.25 and 1 or 0)
+			if level ~= bar.Level then
+				if level > bar.Level then pulseRow(bar, 0.14) end
+				bar.Level = level
+				local colors = (level > 0) and LOW_COLORS or bar.Def.Colors
 				bar.Grad.Color = sequence(colors[1], colors[2])
 			end
-			if low then
-				local pulse = 0.5 + 0.5 * math.sin(now * 6)
-				bar.Fill.BackgroundTransparency = 0.05 + 0.25 * pulse
-				bar.Icon.Rotation = math.sin(now * 14) * 4
+			if bar.Level == 2 then
+				local flash = 0.5 + 0.5 * math.sin(now * 9)
+				bar.Fill.BackgroundTransparency = 0.05 + 0.4 * flash
+				bar.Icon.Rotation = math.sin(now * 16) * 6
+			elseif bar.Level == 1 then
+				local pulse = 0.5 + 0.5 * math.sin(now * 5)
+				bar.Fill.BackgroundTransparency = 0.05 + 0.2 * pulse
+				bar.Icon.Rotation = math.sin(now * 10) * 3
 			else
 				bar.Fill.BackgroundTransparency = 0
 				bar.Icon.Rotation = 0
 			end
 		end
 	end
+
+	-- efeitos ativos
+	local active = {}
+	for _, e in EFFECTS do
+		local endsAt = player:GetAttribute(e.Attr)
+		local left = endsAt and (endsAt - serverNow) or 0
+		local chip = effectChips[e.Key]
+		if left > 0 then
+			chip.Chip.Visible = true
+			chip.Label.Text = tostring(math.ceil(left))
+			active[e.Key] = true
+		else
+			chip.Chip.Visible = false
+		end
+	end
+
+	-- náusea e veneno na tela
+	nauseaAmount += ((active.Nausea and 1 or 0) - nauseaAmount) * (1 - math.exp(-dt * 3))
+	poisonAmount += ((active.Poison and 1 or 0) - poisonAmount) * (1 - math.exp(-dt * 3))
+	local fxOn = nauseaAmount > 0.02 or poisonAmount > 0.02
+	colorFx.Enabled = fxOn
+	blurFx.Enabled = nauseaAmount > 0.02
+	if fxOn then
+		local tint = Color3.new(1, 1, 1)
+			:Lerp(Color3.fromRGB(190, 235, 120), nauseaAmount * 0.45)
+			:Lerp(Color3.fromRGB(205, 160, 255), poisonAmount * 0.3)
+		colorFx.TintColor = tint
+		colorFx.Saturation = -0.25 * nauseaAmount
+		blurFx.Size = nauseaAmount * (3 + 3 * (0.5 + 0.5 * math.sin(now * 2.2)))
+	end
+
+	-- vinheta nas bordas (a condição mais grave manda)
+	local intensity, color = 0, vignetteColor
+	local function consider(amount, c)
+		if amount > intensity then intensity, color = amount, c end
+	end
+	local health = pcts.Health or 1
+	if health < 0.3 then
+		consider((1 - health / 0.3) * 0.55 + 0.08 * math.sin(now * 6), Color3.fromRGB(255, 30, 40))
+	end
+	if (pcts.Thirst or 1) < 0.15 then
+		consider((1 - (pcts.Thirst or 0) / 0.15) * 0.3, Color3.fromRGB(255, 190, 70))
+	end
+	if (pcts.Hunger or 1) < 0.15 then
+		consider((1 - (pcts.Hunger or 0) / 0.15) * 0.3, Color3.fromRGB(255, 140, 50))
+	end
+	if poisonAmount > 0.05 then
+		consider(0.28 * poisonAmount, Color3.fromRGB(160, 70, 230))
+	end
+	vignetteAlpha += ((1 - math.clamp(intensity, 0, 0.9)) - vignetteAlpha) * (1 - math.exp(-dt * 4))
+	vignetteColor = vignetteColor:Lerp(color, 1 - math.exp(-dt * 5))
+	for _, f in vignetteEdges do
+		f.BackgroundTransparency = vignetteAlpha
+		f.BackgroundColor3 = vignetteColor
+	end
 end)
 
 refreshSprint()
-

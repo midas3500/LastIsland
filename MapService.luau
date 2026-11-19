@@ -877,9 +877,6 @@ local function generate()
 	else
 		table.insert(circles, buildMainIsland(mainFolder))
 	end
-	for index = 1, MapConfig.PlayerIslands.Count do
-		table.insert(circles, buildPlayerIsland(index, playersFolder))
-	end
 	table.insert(circles, buildLobby(lobbyFolder))
 
 	-- Pontes

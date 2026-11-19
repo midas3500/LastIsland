@@ -12,7 +12,7 @@ local IslandGenConfig = {}
 IslandGenConfig.Seed = 0
 
 IslandGenConfig.Map = {
-	Radius = 480,        -- raio médio da ilha central (antes 235 -> 340 -> 480). Aumente/diminua à vontade.
+	Radius = 620,        -- raio médio da ilha central (235 -> 340 -> 480 -> 620). Aumente/diminua à vontade.
 	TopRel = 156,        -- altura máxima gerada acima do nível do mar (múltiplo de 4)
 	Chunk = 32,          -- voxels por pedaço escrito (yield entre pedaços)
 	MountainHeight = 70, -- altura das cordilheiras
@@ -28,6 +28,21 @@ IslandGenConfig.World = {
 	LobbyGap = 80,     -- espaço entre a ilha central e o lobby
 	OceanMargin = 160, -- sobra de oceano além da ilha mais distante
 	OceanDepth = 70,   -- profundidade do mar (mar mais fundo). O MapConfig só aumenta, nunca diminui.
+	PlayerIslandScale = 1.6, -- as 12 ilhas dos jogadores ficam 60% maiores (raio e área de construção)
+	LobbyScale = 1.3,
+}
+
+-- Pontes: removidas. Os jogadores atravessam o oceano nadando (futuramente de barco).
+IslandGenConfig.Bridges = {
+	Enabled = false,
+}
+
+-- Mar infinito: planos de água gigantes além do oceano + neblina no horizonte
+IslandGenConfig.Sea = {
+	Enabled = true,
+	Extent = 14000,  -- até onde os planos de água se estendem além da borda do oceano
+	FogStart = 900,
+	FogEnd = 7000,
 }
 
 -- Vulcão (aparece sozinho na geração; o script de erupção você coloca depois)
@@ -64,7 +79,7 @@ IslandGenConfig.Zones = {
 }
 
 -- Quantidades para ilha de raio 235. O gerador multiplica pela área real da ilha.
-IslandGenConfig.CountMultiplier = 0.33
+IslandGenConfig.CountMultiplier = 0.2
 IslandGenConfig.BaseRadius = 235
 
 -- Node = chave de ResourceConfig.Nodes | Zone = faixa acima | Clump = nasce em "florestas"
@@ -84,7 +99,9 @@ IslandGenConfig.Scatter = {
 	{ Node = "OreGold",      Count = 12, Zone = "Mountain", MinDist = 18, MinNormalY = 0.5 },
 	{ Node = "Driftwood",    Count = 22, Zone = "Beach",    MinDist = 8 },
 	-- novos recursos
-	{ Node = "Mushroom",     Count = 30, Zone = "Lowland",  MinDist = 8,  Clump = true },
+	{ Node = "Mushroom",     Count = 24, Zone = "Lowland",  MinDist = 8,  Clump = true },
+	{ Node = "MushroomRed",  Count = 12, Zone = "Lowland",  MinDist = 9,  Clump = true },
+	{ Node = "MushroomBlue", Count = 8,  Zone = "Hills",    MinDist = 10, Clump = true },
 	{ Node = "ClayDeposit",  Count = 14, Zone = "Shore",    MinDist = 14 },
 	{ Node = "ShellPile",    Count = 26, Zone = "Beach",    MinDist = 9 },
 	{ Node = "Beehive",      Count = 12, Zone = "Lowland",  MinDist = 22 },
