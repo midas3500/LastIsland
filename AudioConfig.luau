@@ -51,6 +51,16 @@ AudioConfig.Sounds = {
 	ToolUpgrade   = { Ids = {}, Volume = 0.7 }, -- som metálico de upgrade
 	BackpackUpgrade = { Ids = {}, Volume = 0.7 },
 
+	-- 🌩️ Eventos (todos PENDENTES: coloque IDs para ouvir)
+	Thunder       = { Ids = {}, Volume = 0.9, Pitch = { 0.9, 1.05 } },
+	Rain          = { Ids = {}, Volume = 0.4 },
+	Explosion     = { Ids = {}, Volume = 0.9 },
+	MeteorWhoosh  = { Ids = {}, Volume = 0.8 },
+	VolcanoRoar   = { Ids = {}, Volume = 0.9 },
+	LavaBomb      = { Ids = {}, Volume = 0.8 },
+	Quake         = { Ids = {}, Volume = 0.9 },
+	Alarm         = { Ids = {}, Volume = 0.7 },
+
 	-- 🌊 Água e natação
 	WaterEnter    = { Ids = { 444742380, 18756308263, 9120589946 }, Volume = 0.8, Pitch = { 0.95, 1.05 }, Cooldown = 1.0 },
 	WaterExit     = { Ids = { 9120590107 }, Volume = 0.7, Cooldown = 1.0 },

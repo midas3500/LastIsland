@@ -677,271 +677,280 @@ local function buildMainIsland(folder)
 end
 
 local function buildPlayerIsland(index, folder)
-	local cfg = MapConfig.PlayerIslands
-	local angle = slotAngle(index)
-	local center = cfg.Center + Vector3.new(math.cos(angle) * cfg.RingRadius, 0, math.sin(angle) * cfg.RingRadius)
-	local name = string.format("Island_%02d", index)
+	local function buildPlayerIsland(index, folder, customCenter)
+		local cfg = MapConfig.PlayerIslands
+		local angle = customCenter and math.atan2(customCenter.Z - cfg.Center.Z, customCenter.X - cfg.Center.X) or slotAngle(index)
+		local center = customCenter or (cfg.Center + Vector3.new(math.cos(angle) * cfg.RingRadius, 0, math.sin(angle) * cfg.RingRadius))
+		local name = string.format("Island_%02d", index)
 
-	local model = Instance.new("Model")
-	model.Name = name
-	local base = newFolder("Base", model)
-	local decor = newFolder("Decor", model)
+		local model = Instance.new("Model")
+		model.Name = name
+		local base = newFolder("Base", model)
+		local decor = newFolder("Decor", model)
 
-	buildTiers(base, center, cfg.Radius, cfg.Tiers)
+		buildTiers(base, center, cfg.Radius, cfg.Tiers)
 
-	local ground = tierByName(cfg.Tiers, cfg.GroundTier)
-	local beach = tierByName(cfg.Tiers, "Beach")
-	local groundY = ground.Top
-	local groundApothem = apothemOf(cfg.Radius * ground.Scale)
+		local ground = tierByName(cfg.Tiers, cfg.GroundTier)
+		local beach = tierByName(cfg.Tiers, "Beach")
+		local groundY = ground.Top
+		local groundApothem = apothemOf(cfg.Radius * ground.Scale)
 
-	local blocked = nil
-	if MapConfig.Bridges.PlayerIslandsToMain then
-		blocked = { angle + math.pi }
+		local blocked = nil
+		if MapConfig.Bridges.PlayerIslandsToMain then
+			blocked = { angle + math.pi }
+		end
+
+		local d = MapConfig.Decor.PlayerIsland
+		scatterDecor(decor, center, cfg.Radius, {
+			Palms = d.Palms, Rocks = d.Rocks,
+			PalmMin = d.PalmMin, PalmMax = d.PalmMax, RockMin = d.RockMin, RockMax = d.RockMax,
+			GroundTop = groundY,
+			GroundRadius = groundApothem,
+			BeachTop = beach.Top,
+			Blocked = blocked,
+		})
+
+		-- Placa (a Etapa 2 atualiza o texto com o nome do dono)
+		local toCenter = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local signPosition = Vector3.new(center.X - toCenter.X * cfg.Radius * 0.55, groundY, center.Z - toCenter.Z * cfg.Radius * 0.55)
+		local sign = buildSign(model, signPosition, center, string.format("%s %02d", cfg.Sign.Title, index), cfg.Sign.Subtitle, 1)
+
+		-- Ponto de nascimento (invisível). O IslandService usa SpawnCFrame.
+		local spawnPoint = newPart({
+			Name = "SpawnPoint",
+			Size = Vector3.new(4, 1, 4),
+			CFrame = CFrame.new(center.X, groundY + 3, center.Z),
+			Transparency = 1,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = model,
+		})
+
+		model:SetAttribute("SlotIndex", index)
+		model:SetAttribute("OwnerUserId", 0)
+		model:SetAttribute("Radius", cfg.Radius)
+		model:SetAttribute("BuildRadius", groundApothem * 0.95)
+		model:SetAttribute("GroundY", groundY)
+
+		addGenerated(model, folder)
+		buildResourceMarkers(index, name, center, cfg.Radius, groundY)
+
+		slots[index] = {
+			Index = index,
+			Name = name,
+			Model = model,
+			Sign = sign,
+			Angle = angle,
+			Center = Vector3.new(center.X, groundY, center.Z),
+			SpawnCFrame = spawnPoint.CFrame,
+			Radius = cfg.Radius,
+			BuildRadius = groundApothem * 0.95,
+			GroundY = groundY,
+		}
+
+		return { Name = name, Position = center, Radius = cfg.Radius * cfg.Tiers[1].Scale }
 	end
 
-	local d = MapConfig.Decor.PlayerIsland
-	scatterDecor(decor, center, cfg.Radius, {
-		Palms = d.Palms, Rocks = d.Rocks,
-		PalmMin = d.PalmMin, PalmMax = d.PalmMax, RockMin = d.RockMin, RockMax = d.RockMax,
-		GroundTop = groundY,
-		GroundRadius = groundApothem,
-		BeachTop = beach.Top,
-		Blocked = blocked,
-	})
+	local function buildLobby(folder)
+		local cfg = MapConfig.Lobby
+		local center = cfg.Position
+		local model = Instance.new("Model")
+		model.Name = "LobbyIsland"
+		local base = newFolder("Base", model)
+		local decor = newFolder("Decor", model)
+		local spawns = newFolder("Spawns", model)
 
-	-- Placa (a Etapa 2 atualiza o texto com o nome do dono)
-	local toCenter = Vector3.new(math.cos(angle), 0, math.sin(angle))
-	local signPosition = Vector3.new(center.X - toCenter.X * cfg.Radius * 0.55, groundY, center.Z - toCenter.Z * cfg.Radius * 0.55)
-	local sign = buildSign(model, signPosition, center, string.format("%s %02d", cfg.Sign.Title, index), cfg.Sign.Subtitle, 1)
+		buildTiers(base, center, cfg.Radius, cfg.Tiers)
 
-	-- Ponto de nascimento (invisível). O IslandService usa SpawnCFrame.
-	local spawnPoint = newPart({
-		Name = "SpawnPoint",
-		Size = Vector3.new(4, 1, 4),
-		CFrame = CFrame.new(center.X, groundY + 3, center.Z),
-		Transparency = 1,
-		CanCollide = false,
-		CanQuery = false,
-		Parent = model,
-	})
+		local ground = tierByName(cfg.Tiers, cfg.GroundTier)
+		local beach = tierByName(cfg.Tiers, "Beach")
+		local groundY = ground.Top
 
-	model:SetAttribute("SlotIndex", index)
-	model:SetAttribute("OwnerUserId", 0)
-	model:SetAttribute("Radius", cfg.Radius)
-	model:SetAttribute("BuildRadius", groundApothem * 0.95)
-	model:SetAttribute("GroundY", groundY)
+		-- Pontos de nascimento do lobby
+		for i = 1, cfg.SpawnPads do
+			local a = (i - 1) * (2 * math.pi / cfg.SpawnPads) + math.pi / 4
+			local spawn = Instance.new("SpawnLocation")
+			spawn.Name = "LobbySpawn_" .. i
+			spawn.Anchored = true
+			spawn.Neutral = true
+			spawn.Duration = 0
+			spawn.AllowTeamChangeOnTouch = false
+			spawn.CanTouch = false
+			spawn.TopSurface = Enum.SurfaceType.Smooth
+			spawn.Material = Style.Material
+			spawn.Color = Palette.SpawnPad
+			spawn.Size = Vector3.new(8, 0.4, 8)
+			spawn.CFrame = CFrame.new(center.X + math.cos(a) * cfg.SpawnRadius, groundY + 0.2, center.Z + math.sin(a) * cfg.SpawnRadius)
+			for _, child in ipairs(spawn:GetChildren()) do
+				if child:IsA("Decal") then
+					child:Destroy()
+				end
+			end
+			spawn.Parent = spawns
+		end
 
-	addGenerated(model, folder)
-	buildResourceMarkers(index, name, center, cfg.Radius, groundY)
+		-- Postes de luz
+		for i = 1, cfg.Lamps do
+			local a = (i - 1) * (2 * math.pi / cfg.Lamps) + math.pi / 2 + math.pi / cfg.Lamps
+			local r = cfg.Radius * 0.55
+			buildLamp(decor, Vector3.new(center.X + math.cos(a) * r, groundY, center.Z + math.sin(a) * r))
+		end
 
-	slots[index] = {
-		Index = index,
-		Name = name,
-		Model = model,
-		Sign = sign,
-		Angle = angle,
-		Center = Vector3.new(center.X, groundY, center.Z),
-		SpawnCFrame = spawnPoint.CFrame,
-		Radius = cfg.Radius,
-		BuildRadius = groundApothem * 0.95,
-		GroundY = groundY,
-	}
+		-- Placa grande, ao fundo, virada para o lado da ponte (+Z)
+		local signPosition = Vector3.new(center.X, groundY, center.Z - cfg.Radius * 0.5)
+		buildSign(decor, signPosition, signPosition + Vector3.new(0, 0, 10), cfg.Sign.Title, cfg.Sign.Subtitle, 1.8)
 
-	return { Name = name, Position = center, Radius = cfg.Radius * cfg.Tiers[1].Scale }
-end
+		local d = MapConfig.Decor.Lobby
+		scatterDecor(decor, center, cfg.Radius, {
+			Palms = d.Palms, Rocks = d.Rocks,
+			PalmMin = d.PalmMin, PalmMax = d.PalmMax, RockMin = d.RockMin, RockMax = d.RockMax,
+			GroundTop = groundY,
+			GroundRadius = apothemOf(cfg.Radius * ground.Scale),
+			BeachTop = beach.Top,
+			Blocked = { math.pi / 2, -math.pi / 2 },
+		})
 
-local function buildLobby(folder)
-	local cfg = MapConfig.Lobby
-	local center = cfg.Position
-	local model = Instance.new("Model")
-	model.Name = "LobbyIsland"
-	local base = newFolder("Base", model)
-	local decor = newFolder("Decor", model)
-	local spawns = newFolder("Spawns", model)
+		addGenerated(model, folder)
+		return { Name = "LobbyIsland", Position = center, Radius = cfg.Radius * cfg.Tiers[1].Scale }
+	end
 
-	buildTiers(base, center, cfg.Radius, cfg.Tiers)
+	-- ===========================================================================
+	-- VALIDAÇÃO E GERAÇÃO
+	-- ===========================================================================
 
-	local ground = tierByName(cfg.Tiers, cfg.GroundTier)
-	local beach = tierByName(cfg.Tiers, "Beach")
-	local groundY = ground.Top
+	local function validateLayout(circles)
+		local ok = true
+		local minGap = MapConfig.Validation.MinGap
+		local half = MapConfig.Ocean.Size / 2
 
-	-- Pontos de nascimento do lobby
-	for i = 1, cfg.SpawnPads do
-		local a = (i - 1) * (2 * math.pi / cfg.SpawnPads) + math.pi / 4
-		local spawn = Instance.new("SpawnLocation")
-		spawn.Name = "LobbySpawn_" .. i
-		spawn.Anchored = true
-		spawn.Neutral = true
-		spawn.Duration = 0
-		spawn.AllowTeamChangeOnTouch = false
-		spawn.CanTouch = false
-		spawn.TopSurface = Enum.SurfaceType.Smooth
-		spawn.Material = Style.Material
-		spawn.Color = Palette.SpawnPad
-		spawn.Size = Vector3.new(8, 0.4, 8)
-		spawn.CFrame = CFrame.new(center.X + math.cos(a) * cfg.SpawnRadius, groundY + 0.2, center.Z + math.sin(a) * cfg.SpawnRadius)
-		for _, child in ipairs(spawn:GetChildren()) do
-			if child:IsA("Decal") then
-				child:Destroy()
+		for i = 1, #circles - 1 do
+			for j = i + 1, #circles do
+				local a, b = circles[i], circles[j]
+				local dx, dz = a.Position.X - b.Position.X, a.Position.Z - b.Position.Z
+				local gap = math.sqrt(dx * dx + dz * dz) - a.Radius - b.Radius
+				if gap < minGap then
+					warn(string.format("[MapService] SOBREPOSIÇÃO: %s e %s (espaço %.1f < %d)", a.Name, b.Name, gap, minGap))
+					ok = false
+				end
 			end
 		end
-		spawn.Parent = spawns
-	end
 
-	-- Postes de luz
-	for i = 1, cfg.Lamps do
-		local a = (i - 1) * (2 * math.pi / cfg.Lamps) + math.pi / 2 + math.pi / cfg.Lamps
-		local r = cfg.Radius * 0.55
-		buildLamp(decor, Vector3.new(center.X + math.cos(a) * r, groundY, center.Z + math.sin(a) * r))
-	end
-
-	-- Placa grande, ao fundo, virada para o lado da ponte (+Z)
-	local signPosition = Vector3.new(center.X, groundY, center.Z - cfg.Radius * 0.5)
-	buildSign(decor, signPosition, signPosition + Vector3.new(0, 0, 10), cfg.Sign.Title, cfg.Sign.Subtitle, 1.8)
-
-	local d = MapConfig.Decor.Lobby
-	scatterDecor(decor, center, cfg.Radius, {
-		Palms = d.Palms, Rocks = d.Rocks,
-		PalmMin = d.PalmMin, PalmMax = d.PalmMax, RockMin = d.RockMin, RockMax = d.RockMax,
-		GroundTop = groundY,
-		GroundRadius = apothemOf(cfg.Radius * ground.Scale),
-		BeachTop = beach.Top,
-		Blocked = { math.pi / 2, -math.pi / 2 },
-	})
-
-	addGenerated(model, folder)
-	return { Name = "LobbyIsland", Position = center, Radius = cfg.Radius * cfg.Tiers[1].Scale }
-end
-
--- ===========================================================================
--- VALIDAÇÃO E GERAÇÃO
--- ===========================================================================
-
-local function validateLayout(circles)
-	local ok = true
-	local minGap = MapConfig.Validation.MinGap
-	local half = MapConfig.Ocean.Size / 2
-
-	for i = 1, #circles - 1 do
-		for j = i + 1, #circles do
-			local a, b = circles[i], circles[j]
-			local dx, dz = a.Position.X - b.Position.X, a.Position.Z - b.Position.Z
-			local gap = math.sqrt(dx * dx + dz * dz) - a.Radius - b.Radius
-			if gap < minGap then
-				warn(string.format("[MapService] SOBREPOSIÇÃO: %s e %s (espaço %.1f < %d)", a.Name, b.Name, gap, minGap))
+		for _, c in ipairs(circles) do
+			if math.abs(c.Position.X) + c.Radius > half - 10 or math.abs(c.Position.Z) + c.Radius > half - 10 then
+				warn(string.format("[MapService] %s ultrapassa o limite do oceano.", c.Name))
 				ok = false
 			end
 		end
+
+		return ok
 	end
 
-	for _, c in ipairs(circles) do
-		if math.abs(c.Position.X) + c.Radius > half - 10 or math.abs(c.Position.Z) + c.Radius > half - 10 then
-			warn(string.format("[MapService] %s ultrapassa o limite do oceano.", c.Name))
-			ok = false
+	local function cleanTemplate()
+		for _, name in ipairs(MapConfig.RemoveDefaultObjects) do
+			local object = Workspace:FindFirstChild(name)
+			if object and object:IsA("BasePart") then
+				object:Destroy()
+				log("Removido do template: " .. name)
+			end
 		end
 	end
 
-	return ok
-end
+	local function generate()
+		local startedAt = os.clock()
+		local names = MapConfig.Folders
 
-local function cleanTemplate()
-	for _, name in ipairs(MapConfig.RemoveDefaultObjects) do
-		local object = Workspace:FindFirstChild(name)
-		if object and object:IsA("BasePart") then
-			object:Destroy()
-			log("Removido do template: " .. name)
+		cleanTemplate()
+
+		local mapFolder = getFolder(names.Map, Workspace)
+		local oceanFolder = getFolder(names.Ocean, mapFolder)
+		local mainFolder = getFolder(names.MainIsland, mapFolder)
+		local playersFolder = getFolder(names.PlayerIslands, mapFolder)
+		getFolder(names.ResourceSpawns, mapFolder)
+		getFolder(names.EventAreas, Workspace)
+		local lobbyFolder = getFolder(names.Lobby, Workspace)
+
+		buildOcean(oceanFolder)
+
+		local circles = {}
+		if MapConfig.MainIsland.Enabled == false then
+			local cfg = MapConfig.MainIsland
+			table.insert(circles, { Name = "CentralIsland", Position = cfg.Position, Radius = cfg.Radius * 1.3 })
+		else
+			table.insert(circles, buildMainIsland(mainFolder)) -- (ilha antiga, com o farol de torre vermelha)
 		end
-	end
-end
+		if not MapConfig.PlayerIslands.Dynamic then
+			for index = 1, MapConfig.PlayerIslands.Count do
+				table.insert(circles, buildPlayerIsland(index, playersFolder))
+			end
+		end
+		if MapConfig.Lobby.Enabled ~= false then
+			table.insert(circles, buildLobby(lobbyFolder))
+		end
+		table.insert(circles, buildLobby(lobbyFolder))
 
-local function generate()
-	local startedAt = os.clock()
-	local names = MapConfig.Folders
+		-- Pontes
+		local bridgeCfg = MapConfig.Bridges
+		local mainCfg = MapConfig.MainIsland
+		local lobbyCfg = MapConfig.Lobby
+		local playerCfg = MapConfig.PlayerIslands
 
-	cleanTemplate()
-
-	local mapFolder = getFolder(names.Map, Workspace)
-	local oceanFolder = getFolder(names.Ocean, mapFolder)
-	local mainFolder = getFolder(names.MainIsland, mapFolder)
-	local playersFolder = getFolder(names.PlayerIslands, mapFolder)
-	getFolder(names.ResourceSpawns, mapFolder)
-	getFolder(names.EventAreas, Workspace)
-	local lobbyFolder = getFolder(names.Lobby, Workspace)
-
-	buildOcean(oceanFolder)
-
-	local circles = {}
-	if MapConfig.MainIsland.Enabled == false then
-		local cfg = MapConfig.MainIsland
-		table.insert(circles, { Name = "CentralIsland", Position = cfg.Position, Radius = cfg.Radius * 1.3 })
-	else
-		table.insert(circles, buildMainIsland(mainFolder))
-	end
-	table.insert(circles, buildLobby(lobbyFolder))
-
-	-- Pontes
-	local bridgeCfg = MapConfig.Bridges
-	local mainCfg = MapConfig.MainIsland
-	local lobbyCfg = MapConfig.Lobby
-	local playerCfg = MapConfig.PlayerIslands
-
-	if bridgeCfg.LobbyToMain then
-		local lobbyEdge = apothemOf(lobbyCfg.Radius) - 4
-		local mainEdge = apothemOf(mainCfg.Radius) - 4
-		buildBridge(
-			lobbyFolder, "Bridge_LobbyToMain",
-			lobbyCfg.Position + Vector3.new(0, 0, lobbyEdge),
-			mainCfg.Position - Vector3.new(0, 0, mainEdge)
-		)
-	end
-
-	if bridgeCfg.PlayerIslandsToMain then
-		local islandEdge = apothemOf(playerCfg.Radius) - 4
-		local mainEdge = apothemOf(mainCfg.Radius) - 4
-		for index, slot in ipairs(slots) do
-			local dir = Vector3.new(math.cos(slot.Angle), 0, math.sin(slot.Angle))
+		if bridgeCfg.LobbyToMain then
+			local lobbyEdge = apothemOf(lobbyCfg.Radius) - 4
+			local mainEdge = apothemOf(mainCfg.Radius) - 4
 			buildBridge(
-				slot.Model, string.format("Bridge_Island%02d", index),
-				slot.Center - dir * islandEdge,
-				mainCfg.Position + dir * mainEdge
+				lobbyFolder, "Bridge_LobbyToMain",
+				lobbyCfg.Position + Vector3.new(0, 0, lobbyEdge),
+				mainCfg.Position - Vector3.new(0, 0, mainEdge)
 			)
 		end
+
+		if bridgeCfg.PlayerIslandsToMain then
+			local islandEdge = apothemOf(playerCfg.Radius) - 4
+			local mainEdge = apothemOf(mainCfg.Radius) - 4
+			for index, slot in ipairs(slots) do
+				local dir = Vector3.new(math.cos(slot.Angle), 0, math.sin(slot.Angle))
+				buildBridge(
+					slot.Model, string.format("Bridge_Island%02d", index),
+					slot.Center - dir * islandEdge,
+					mainCfg.Position + dir * mainEdge
+				)
+			end
+		end
+
+		local layoutOk = validateLayout(circles)
+		log(layoutOk and "Verificação de sobreposição: OK (nenhuma ilha se sobrepõe)" or "Verificação de sobreposição: FALHOU (veja avisos acima)")
+		log(string.format(
+			"Mapa gerado em %.2fs | %d peças | %d ilhas de jogadores",
+			os.clock() - startedAt, #mapFolder:GetDescendants() + #lobbyFolder:GetDescendants(), #slots
+			))
 	end
 
-	local layoutOk = validateLayout(circles)
-	log(layoutOk and "Verificação de sobreposição: OK (nenhuma ilha se sobrepõe)" or "Verificação de sobreposição: FALHOU (veja avisos acima)")
-	log(string.format(
-		"Mapa gerado em %.2fs | %d peças | %d ilhas de jogadores",
-		os.clock() - startedAt, #mapFolder:GetDescendants() + #lobbyFolder:GetDescendants(), #slots
-		))
-end
+	-- ===========================================================================
+	-- API
+	-- ===========================================================================
 
--- ===========================================================================
--- API
--- ===========================================================================
-
-function MapService.GetIslandSlots()
-	return table.clone(slots)
-end
-
-function MapService.GetSlot(index)
-	return slots[index]
-end
-
-function MapService.IsReady()
-	return ready
-end
-
-function MapService.Init()
-end
-
-function MapService.Start()
-	local ok, err = xpcall(generate, debug.traceback)
-	if not ok then
-		warn("[MapService] Falha ao gerar o mapa:\n" .. tostring(err))
-		return
+	function MapService.GetIslandSlots()
+		return table.clone(slots)
 	end
-	ready = true
-end
 
-return MapService
+	function MapService.GetSlot(index)
+		return slots[index]
+	end
+
+	function MapService.IsReady()
+		return ready
+	end
+
+	function MapService.Init()
+	end
+
+	function MapService.Start()
+		local ok, err = xpcall(generate, debug.traceback)
+		if not ok then
+			warn("[MapService] Falha ao gerar o mapa:\n" .. tostring(err))
+			return
+		end
+		ready = true
+	end
+
+	return MapService

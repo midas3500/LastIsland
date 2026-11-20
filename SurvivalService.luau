@@ -33,10 +33,21 @@ local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService"
 local InventoryService = require(script.Parent:WaitForChild("InventoryService"))
 local WaterService = require(script.Parent:WaitForChild("WaterService"))
 
+-- Balanceamento (multiplicadores do NutritionConfig.Balance sobre o SurvivalConfig)
+local Balance = NC.Balance
+local ST = table.clone(Config.Stamina)
+ST.Max = ST.Max * Balance.StaminaMax
+ST.DrainPerSecond = ST.DrainPerSecond * Balance.StaminaDrain
+ST.RegenPerSecond = ST.RegenPerSecond * Balance.StaminaRegen
+local HG = table.clone(Config.Hunger)
+HG.DrainPerSecond = HG.DrainPerSecond * Balance.HungerDrain
+
 local SurvivalService = {}
 
 local sprintRemote
 local foodRemote
+local crouchRemote
+local lastCrouchRequest = setmetatable({}, { __mode = "k" })
 local states = {}
 local lastSprintRequest = {}
 local lastFoodRequest = {}
@@ -66,10 +77,12 @@ local function currentSpeed(state)
 		else
 			speed = swim.Speed
 		end
+	elseif state.Crouching then
+		speed = ST.WalkSpeed * Balance.CrouchSpeed
 	elseif state.Sprinting then
-		speed = Config.Stamina.SprintSpeed
+		speed = ST.SprintSpeed
 	else
-		speed = Config.Stamina.WalkSpeed
+		speed = ST.WalkSpeed
 	end
 
 	local now = os.clock()
@@ -79,6 +92,11 @@ local function currentSpeed(state)
 	end
 	if fx.Nausea and fx.Nausea > now then
 		speed *= NC.Effects.Nausea.SpeedMultiplier
+	end
+	speed *= (Workspace:GetAttribute("WorldSpeedMultiplier") or 1)
+	if state.Player then
+		-- futuro: equipamentos
+		speed *= (state.Player:GetAttribute("SpeedMultiplier") or 1)
 	end
 	return speed
 end
@@ -96,27 +114,52 @@ end
 local function setSprint(player, enabled)
 	local state = getState(player)
 	if not state then return end
-	if enabled and state.Stamina < Config.Stamina.MinimumToSprint then
+	if enabled and state.Stamina < ST.MinimumToSprint then
 		enabled = false
+	end
+	if enabled and state.Crouching then
+		state.Crouching = false
+		player:SetAttribute("IsCrouching", false)
 	end
 	state.Sprinting = enabled
 	player:SetAttribute("IsSprinting", enabled)
 	applySpeed(player, state)
 end
 
+local function setCrouch(player, enabled)
+	local state = getState(player)
+	if not state then return end
+	if enabled and state.InWater then enabled = false end
+	if enabled and state.Sprinting then
+		state.Sprinting = false
+		player:SetAttribute("IsSprinting", false)
+	end
+	state.Crouching = enabled
+	player:SetAttribute("IsCrouching", enabled)
+	applySpeed(player, state)
+end
+
 local function updateCharacter(player, character)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if not humanoid then return end
+	-- montanhas íngremes: acima desta inclinação não dá para subir andando
+	humanoid.MaxSlopeAngle = Balance.MaxSlopeAngle + (player:GetAttribute("ClimbBonus") or 0)
 	local state = getState(player)
 	if state then
 		state.Sprinting = false
+		state.Crouching = false
 		state.InWater = false
+		state.Submerged = false
 		state.OutCount = 0
+		state.Oxygen = NC.Oxygen.Max
 		player:SetAttribute("IsSprinting", false)
+		player:SetAttribute("IsCrouching", false)
 		player:SetAttribute("InWater", false)
+		player:SetAttribute("Submerged", false)
+		player:SetAttribute("Oxygen", NC.Oxygen.Max)
 		humanoid.WalkSpeed = currentSpeed(state)
 	else
-		humanoid.WalkSpeed = Config.Stamina.WalkSpeed
+		humanoid.WalkSpeed = ST.WalkSpeed
 	end
 end
 
@@ -128,7 +171,7 @@ local function initializePlayer(player, data)
 	data.Survival = data.Survival or {}
 	local saved = data.Survival
 
-	local hunger = math.clamp(tonumber(saved.Hunger) or Config.Hunger.Max, 0, Config.Hunger.Max)
+	local hunger = math.clamp(tonumber(saved.Hunger) or HG.Max, 0, HG.Max)
 	local thirst = math.clamp(tonumber(saved.Thirst) or NC.Thirst.Max, 0, NC.Thirst.Max)
 	local saturation = math.clamp(tonumber(saved.Saturation) or 0, 0, NC.Saturation.Max)
 
@@ -136,7 +179,7 @@ local function initializePlayer(player, data)
 		Hunger = hunger,
 		Thirst = thirst,
 		Saturation = saturation,
-		Stamina = Config.Stamina.Max,
+		Stamina = ST.Max,
 		Sprinting = false,
 		LastSprint = 0,
 		DamageTimer = 0,
@@ -146,18 +189,27 @@ local function initializePlayer(player, data)
 		OutCount = 0,
 		WaterTimer = 0,
 		Effects = {}, -- [nome] = os.clock() em que acaba
+		Player = player,
+		Crouching = false,
+		Submerged = false,
+		Oxygen = NC.Oxygen.Max,
+		OxygenDamageTimer = 0,
 	}
 
-	player:SetAttribute("MaxHunger", Config.Hunger.Max)
-	player:SetAttribute("MaxStamina", Config.Stamina.Max)
+	player:SetAttribute("MaxHunger", HG.Max)
+	player:SetAttribute("MaxStamina", ST.Max)
 	player:SetAttribute("MaxThirst", NC.Thirst.Max)
 	player:SetAttribute("MaxSaturation", NC.Saturation.Max)
 	player:SetAttribute("Hunger", hunger)
-	player:SetAttribute("Stamina", Config.Stamina.Max)
+	player:SetAttribute("Stamina", ST.Max)
 	player:SetAttribute("Thirst", thirst)
 	player:SetAttribute("Saturation", saturation)
 	player:SetAttribute("IsSprinting", false)
 	player:SetAttribute("InWater", false)
+	player:SetAttribute("MaxOxygen", NC.Oxygen.Max)
+	player:SetAttribute("Oxygen", NC.Oxygen.Max)
+	player:SetAttribute("Submerged", false)
+	player:SetAttribute("IsCrouching", false)
 	player:SetAttribute("SurvivalReady", true)
 
 	if player.Character then
@@ -185,7 +237,7 @@ local function onSprintRequest(player, enabled)
 	if not state then return end
 	if enabled then
 		if not PlayerDataService.IsLoaded(player) then return end
-		if state.Stamina < Config.Stamina.MinimumToSprint then return end
+		if state.Stamina < ST.MinimumToSprint then return end
 	end
 	setSprint(player, enabled)
 end
@@ -193,6 +245,15 @@ end
 ----------------------------------------------------------------------
 -- Efeitos
 ----------------------------------------------------------------------
+local function onCrouchRequest(player, enabled)
+	if typeof(enabled) ~= "boolean" then return end
+	local now = os.clock()
+	if lastCrouchRequest[player] and now - lastCrouchRequest[player] < 0.1 then return end
+	lastCrouchRequest[player] = now
+	if not getState(player) or not PlayerDataService.IsLoaded(player) then return end
+	setCrouch(player, enabled)
+end
+
 local EFFECT_ATTRIBUTE = { Energy = "FxEnergyEnd", Nausea = "FxNauseaEnd", Poison = "FxPoisonEnd" }
 
 local function applyEffect(player, state, effectId)
@@ -202,7 +263,7 @@ local function applyEffect(player, state, effectId)
 	local serverNow = Workspace:GetServerTimeNow()
 
 	if effectId == "Energy" then
-		state.Stamina = math.min(Config.Stamina.Max, state.Stamina + (def.StaminaRestore or 0))
+		state.Stamina = math.min(ST.Max, state.Stamina + (def.StaminaRestore or 0))
 	end
 	state.Effects[effectId] = now + def.Duration
 	player:SetAttribute(EFFECT_ATTRIBUTE[effectId], serverNow + def.Duration)
@@ -247,10 +308,10 @@ local function deny(player, itemId, reason)
 end
 
 local function isUseful(state, humanoid, def)
-	if (def.Hunger or 0) > 0 and state.Hunger < Config.Hunger.Max then return true end
+	if (def.Hunger or 0) > 0 and state.Hunger < HG.Max then return true end
 	if (def.Saturation or 0) > 0 and state.Saturation < NC.Saturation.Max then return true end
 	if (def.Water or 0) > 0 and state.Thirst < NC.Thirst.Max then return true end
-	if (def.Stamina or 0) > 0 and state.Stamina < Config.Stamina.Max then return true end
+	if (def.Stamina or 0) > 0 and state.Stamina < ST.Max then return true end
 	if (def.Health or 0) > 0 and humanoid and humanoid.Health < humanoid.MaxHealth then return true end
 	return def.RandomEffects ~= nil
 end
@@ -285,10 +346,10 @@ local function onFoodRequest(player, action, itemId)
 		return deny(player, itemId, "Você não tem esse item.")
 	end
 
-	state.Hunger = math.clamp(state.Hunger + (def.Hunger or 0), 0, Config.Hunger.Max)
+	state.Hunger = math.clamp(state.Hunger + (def.Hunger or 0), 0, HG.Max)
 	state.Saturation = math.clamp(state.Saturation + (def.Saturation or 0), 0, NC.Saturation.Max)
 	state.Thirst = math.clamp(state.Thirst + (def.Water or 0), 0, NC.Thirst.Max)
-	state.Stamina = math.clamp(state.Stamina + (def.Stamina or 0), 0, Config.Stamina.Max)
+	state.Stamina = math.clamp(state.Stamina + (def.Stamina or 0), 0, ST.Max)
 	if (def.Health or 0) > 0 then
 		humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + def.Health)
 	end
@@ -324,7 +385,7 @@ end
 function SurvivalService.AddHunger(player, amount)
 	local state = getState(player)
 	if not state or type(amount) ~= "number" then return false end
-	state.Hunger = math.clamp(state.Hunger + amount, 0, Config.Hunger.Max)
+	state.Hunger = math.clamp(state.Hunger + amount, 0, HG.Max)
 	player:SetAttribute("Hunger", state.Hunger)
 	return true
 end
@@ -349,6 +410,9 @@ end
 -- Atualização contínua
 ----------------------------------------------------------------------
 local function setInWater(player, state, inWater)
+	if inWater and state.Crouching then
+		setCrouch(player, false)
+	end
 	state.InWater = inWater
 	player:SetAttribute("InWater", inWater)
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -388,15 +452,41 @@ local function updatePlayer(player, dt)
 		end
 	end
 
+	-- OXIGÊNIO: só a CABEÇA debaixo d'água conta como submerso (nadar na superfície não gasta)
+	local head = character and character:FindFirstChild("Head")
+	local submerged = false
+	if head and alive then
+		submerged = WaterService.IsInWater(head.Position + Vector3.new(0, 0.2, 0))
+	end
+	if submerged ~= state.Submerged then
+		state.Submerged = submerged
+		player:SetAttribute("Submerged", submerged)
+	end
+	local OX = NC.Oxygen
+	if submerged then
+		state.Oxygen = math.max(0, state.Oxygen - OX.DrainPerSecond * dt)
+		if state.Oxygen <= 0 and alive then
+			state.OxygenDamageTimer += dt
+			if state.OxygenDamageTimer >= OX.DamageInterval then
+				state.OxygenDamageTimer = 0
+				humanoid:TakeDamage(OX.Damage)
+			end
+		end
+	else
+		state.OxygenDamageTimer = 0
+		state.Oxygen = math.min(OX.Max, state.Oxygen + OX.RegenPerSecond * dt)
+	end
+	player:SetAttribute("Oxygen", state.Oxygen)
+
 	-- SACIEDADE / FOME: a saciedade se esgota primeiro; só depois a fome cai
 	if state.Saturation > 0 then
 		state.Saturation = math.max(0, state.Saturation - NC.Saturation.DrainPerSecond * dt)
 	else
-		state.Hunger = math.clamp(state.Hunger - Config.Hunger.DrainPerSecond * dt, 0, Config.Hunger.Max)
+		state.Hunger = math.clamp(state.Hunger - HG.DrainPerSecond * dt, 0, HG.Max)
 	end
 
 	-- SEDE: cai com o tempo e mais rápido correndo/nadando (seca: ThirstMultiplier no Workspace)
-	local thirstMultiplier = Workspace:GetAttribute("ThirstMultiplier") or 1
+	local thirstMultiplier = (Workspace:GetAttribute("ThirstMultiplier") or 1) * (player:GetAttribute("TempThirstMult") or 1)
 	if moving and state.InWater then
 		thirstMultiplier *= NC.Thirst.SwimMultiplier
 	elseif moving and state.Sprinting then
@@ -417,18 +507,18 @@ local function updatePlayer(player, dt)
 		end
 		-- na água a stamina não regenera
 	elseif state.Sprinting and moving then
-		state.Stamina = math.max(0, state.Stamina - Config.Stamina.DrainPerSecond * dt)
+		state.Stamina = math.max(0, state.Stamina - ST.DrainPerSecond * (player:GetAttribute("TempStaminaDrainMult") or 1) * dt)
 		state.LastSprint = os.clock()
 		if state.Stamina <= 0 then
 			setSprint(player, false)
 		end
 	else
-		if os.clock() - state.LastSprint >= Config.Stamina.RegenDelay then
-			local regen = Config.Stamina.RegenPerSecond * dt
+		if os.clock() - state.LastSprint >= ST.RegenDelay then
+			local regen = ST.RegenPerSecond * dt * (Workspace:GetAttribute("WorldStaminaRegenMultiplier") or 1) * (player:GetAttribute("TempStaminaRegenMult") or 1)
 			if nauseaActive then
 				regen *= NC.Effects.Nausea.StaminaRegenMultiplier
 			end
-			state.Stamina = math.min(Config.Stamina.Max, state.Stamina + regen)
+			state.Stamina = math.min(ST.Max, state.Stamina + regen)
 		end
 	end
 
@@ -449,9 +539,9 @@ local function updatePlayer(player, dt)
 	-- DANO POR FOME
 	if state.Hunger <= 0 and alive then
 		state.DamageTimer += dt
-		if state.DamageTimer >= Config.Hunger.DamageInterval then
+		if state.DamageTimer >= HG.DamageInterval then
 			state.DamageTimer = 0
-			humanoid:TakeDamage(Config.Hunger.StarvationDamage)
+			humanoid:TakeDamage(HG.StarvationDamage)
 		end
 	else
 		state.DamageTimer = 0
@@ -466,6 +556,26 @@ local function updatePlayer(player, dt)
 		end
 	else
 		state.ThirstDamageTimer = 0
+	end
+
+	-- ruído dos passos (para ameaças futuras: 0 parado, 0.2 agachado, 1 andando, 1.8 correndo)
+	local noise = 0
+	if moving and alive then
+		if state.InWater then
+			noise = 0.5
+		elseif state.Crouching then
+			noise = Balance.CrouchNoise
+		elseif state.Sprinting then
+			noise = 1.8
+		else
+			noise = 1
+		end
+	end
+	player:SetAttribute("NoiseLevel", noise)
+
+	if humanoid then
+		local slope = Balance.MaxSlopeAngle + (player:GetAttribute("ClimbBonus") or 0)
+		if humanoid.MaxSlopeAngle ~= slope then humanoid.MaxSlopeAngle = slope end
 	end
 
 	-- velocidade (efeitos que acabaram, stamina zerada na água...)
@@ -512,6 +622,12 @@ function SurvivalService.Init()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	sprintRemote = remotes:WaitForChild("SprintRequest")
 	foodRemote = remotes:WaitForChild("FoodRequest")
+	crouchRemote = remotes:FindFirstChild("CrouchRequest")
+	if not crouchRemote then
+		crouchRemote = Instance.new("RemoteEvent")
+		crouchRemote.Name = "CrouchRequest"
+		crouchRemote.Parent = remotes
+	end
 	log("Init concluído.")
 end
 
@@ -520,6 +636,7 @@ function SurvivalService.Start()
 	running = true
 
 	sprintRemote.OnServerEvent:Connect(onSprintRequest)
+	crouchRemote.OnServerEvent:Connect(onCrouchRequest)
 	foodRemote.OnServerEvent:Connect(onFoodRequest)
 
 	PlayerDataService.OnLoaded(initializePlayer)

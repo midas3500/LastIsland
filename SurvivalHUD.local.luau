@@ -5,7 +5,7 @@
 	Canto inferior esquerdo, compacto: VIDA, FOME (com linha de saciedade), STAMINA e SEDE.
 	Ícones de efeitos (energia, náusea, veneno), transições nos níveis críticos e relógio.
 	O botão de comer coco FOI REMOVIDO: agora se come/bebe pela mochila (tecla B).
-	Controles: SHIFT = correr (botão 🏃 só aparece em celular/tablet)
+	Corrida (Shift) e agachar (Ctrl) ficam no MovementClient.
 ]]
 
 local Players = game:GetService("Players")
@@ -168,45 +168,7 @@ for i, e in EFFECTS do
 	effectChips[e.Key] = { Chip = chip, Label = timeLabel }
 end
 
-----------------------------------------------------------------------
--- Correr (Shift; botão só em celular/tablet)
-----------------------------------------------------------------------
-local keyboardSprint, mobileSprint = false, false
-local sprintButton
-
-local function refreshSprint()
-	sprintRemote:FireServer(keyboardSprint or mobileSprint)
-	if sprintButton then
-		local on = keyboardSprint or mobileSprint
-		sprintButton.BackgroundColor3 = on and Color3.fromRGB(70, 180, 130) or Color3.fromRGB(46, 128, 92)
-	end
-end
-
-if UserInputService.TouchEnabled then
-	sprintButton = new("TextButton", {
-		Name = "SprintButton", AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 220, 1, -12), Size = UDim2.fromOffset(48, 48),
-		BackgroundColor3 = Color3.fromRGB(46, 128, 92), Text = "🏃", TextSize = 24, AutoButtonColor = false, BorderSizePixel = 0,
-	}, gui)
-	corner(sprintButton, 24)
-	sprintButton.Activated:Connect(function()
-		mobileSprint = not mobileSprint
-		refreshSprint()
-	end)
-end
-
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-		keyboardSprint = true
-		refreshSprint()
-	end
-end)
-UserInputService.InputEnded:Connect(function(input)
-	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
-		keyboardSprint = false
-		refreshSprint()
-	end
-end)
+local function refreshSprint() end -- corrida e agachar agora ficam no MovementClient
 
 ----------------------------------------------------------------------
 -- Relógio (canto superior direito)
@@ -428,3 +390,4 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 refreshSprint()
+

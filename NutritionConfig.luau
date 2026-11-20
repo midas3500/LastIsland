@@ -14,7 +14,7 @@ local NutritionConfig = {}
 ----------------------------------------------------------------------
 NutritionConfig.Thirst = {
 	Max = 100,
-	DrainPerSecond = 0.10,   -- parado
+	DrainPerSecond = 0.07,   -- parado (partida mais longa)
 	SprintMultiplier = 2.0,  -- correndo
 	SwimMultiplier = 1.8,    -- nadando
 	DamageInterval = 2,      -- desidratado (sede 0): dano a cada X segundos
@@ -73,16 +73,16 @@ NutritionConfig.Effects = {
 --                   (os pesos são normalizados; cada cogumelo tem os seus)
 ----------------------------------------------------------------------
 NutritionConfig.Consumables = {
-	Coconut = { Action = "Eat", Hunger = 12, Saturation = 8, Water = 12 },
-	Apple   = { Action = "Eat", Hunger = 14, Saturation = 10, Water = 6 },
-	Banana  = { Action = "Eat", Hunger = 18, Saturation = 18, Water = 2 },
-	Berry   = { Action = "Eat", Hunger = 5, Saturation = 2, Water = 5 },
-	Honey   = { Action = "Eat", Hunger = 10, Saturation = 35, Water = 0, Stamina = 15 },
+	Coconut = { Action = "Eat", Hunger = 9, Saturation = 6, Water = 9 },
+	Apple   = { Action = "Eat", Hunger = 10, Saturation = 8, Water = 4 },
+	Banana  = { Action = "Eat", Hunger = 14, Saturation = 14, Water = 2 },
+	Berry   = { Action = "Eat", Hunger = 4, Saturation = 2, Water = 4 },
+	Honey   = { Action = "Eat", Hunger = 8, Saturation = 26, Water = 0, Stamina = 15 },
 	Herb    = { Action = "Eat", Hunger = 2, Saturation = 0, Water = 0, Health = 15 },
 
 	-- Cogumelos: cada espécie tem as suas probabilidades
 	Mushroom = { -- Cogumelo Marrom (comum, quase sempre seguro)
-		Action = "Eat", Hunger = 8, Saturation = 5, Water = 1,
+		Action = "Eat", Hunger = 6, Saturation = 4, Water = 1,
 		RandomEffects = {
 			{ Effect = "None", Chance = 60 },
 			{ Effect = "Energy", Chance = 25 },
@@ -91,7 +91,7 @@ NutritionConfig.Consumables = {
 		},
 	},
 	MushroomRed = { -- Cogumelo Vermelho (perigoso)
-		Action = "Eat", Hunger = 6, Saturation = 3, Water = 1,
+		Action = "Eat", Hunger = 4, Saturation = 2, Water = 1,
 		RandomEffects = {
 			{ Effect = "None", Chance = 25 },
 			{ Effect = "Energy", Chance = 10 },
@@ -100,7 +100,7 @@ NutritionConfig.Consumables = {
 		},
 	},
 	MushroomBlue = { -- Cogumelo Azul (energético, quase nunca faz mal)
-		Action = "Eat", Hunger = 7, Saturation = 4, Water = 2,
+		Action = "Eat", Hunger = 5, Saturation = 3, Water = 2,
 		RandomEffects = {
 			{ Effect = "None", Chance = 40 },
 			{ Effect = "Energy", Chance = 55 },
@@ -110,7 +110,32 @@ NutritionConfig.Consumables = {
 	},
 
 	-- Exemplo de bebida para o futuro (crie o item "WaterBottle" no ResourceConfig):
-	-- WaterBottle = { Action = "Drink", Hunger = 0, Saturation = 0, Water = 40 },
+	-- WaterBottle = { Action = "Drink", Hunger = 0, Saturation = 0, Water = 30 },
+}
+
+
+----------------------------------------------------------------------
+-- Oxigênio (debaixo d'água; nadar na superfície NÃO gasta oxigênio)
+----------------------------------------------------------------------
+NutritionConfig.Oxygen = {
+	Max = 35,             -- segundos de fôlego
+	DrainPerSecond = 1,
+	RegenPerSecond = 9,   -- recupera rápido ao voltar à superfície
+	Damage = 8,           -- vida perdida a cada DamageInterval com o oxigênio em zero
+	DamageInterval = 1,
+}
+
+----------------------------------------------------------------------
+-- Balanceamento (multiplicadores sobre o SurvivalConfig, sem precisar editá-lo)
+----------------------------------------------------------------------
+NutritionConfig.Balance = {
+	StaminaMax = 1.8,     -- mais stamina para explorar distâncias maiores
+	StaminaDrain = 0.7,   -- corrida gasta menos
+	StaminaRegen = 1.5,   -- regenera mais rápido
+	HungerDrain = 0.55,   -- fome cai mais devagar (a comida em si rende menos e há menos comida)
+	CrouchSpeed = 0.5,    -- velocidade agachado = metade da andando
+	CrouchNoise = 0.2,    -- ruído de passos agachado (1 = andando normal)
+	MaxSlopeAngle = 48,   -- inclinação máxima que dá para subir andando (montanhas íngremes exigem trilhas/equipamento)
 }
 
 return NutritionConfig

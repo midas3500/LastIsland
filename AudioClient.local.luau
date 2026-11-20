@@ -17,7 +17,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 local ContentProvider = game:GetService("ContentProvider")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -127,89 +126,53 @@ task.spawn(function()
 end)
 
 ----------------------------------------------------------------------
--- Coleta (pancadas enquanto coleta + som ao receber o item)
+-- Coleta: o SERVIDOR avisa cada golpe real ("Hit") e a conclusão ("Done").
+-- Negada ("Denied") ou cancelada ("Cancel") = silêncio.
 ----------------------------------------------------------------------
-local currentGather = nil -- { Token, Node, Audio, Start, Duration, Position }
-
-local function resolveNode(prompt)
-	local inst = prompt
-	for _ = 1, 8 do
-		if not inst then break end
-		local key = inst:GetAttribute("ResourceType") or inst:GetAttribute("NodeType") or inst:GetAttribute("NodeKey")
-		if type(key) == "string" and ResourceConfig.Nodes[key] then return key end
-		local base = inst.Name:match("^Isl_(%a+)")
-		if base and ResourceConfig.Nodes[base] then return base end
-		local plain = inst.Name:match("^(%a+)_%d+$")
-		if plain and ResourceConfig.Nodes[plain] then return plain end
-		inst = inst.Parent
-	end
-	return nil
-end
-
-local function promptPosition(prompt)
-	local parent = prompt.Parent
-	if parent and parent:IsA("Attachment") then return parent.WorldPosition end
-	if parent and parent:IsA("BasePart") then return parent.Position end
-	return nil
-end
+local lastGatherKey, lastGatherPosition, lastGatherTime = nil, nil, 0
 
 local function audioForNode(key)
 	local def = ResourceConfig.Nodes[key]
 	local base = key:gsub("_V%d+$", "")
-	return cfg.Gather.ByNode[base] or (def and cfg.Gather.ByTool[def.Tool]) or { Hit = { "LeafRip" }, Done = {} }, def
+	return cfg.Gather.ByNode[base] or (def and cfg.Gather.ByTool[def.Tool]) or { Hit = { "LeafRip" }, Done = {} }
 end
 
-local function startGather(prompt)
-	local key = resolveNode(prompt)
-	if not key then return end
-	local audio, def = audioForNode(key)
-	local token = {}
-	local duration = (def and def.GatherTime or 3) + 0.5
-	local position = promptPosition(prompt)
-	currentGather = { Token = token, Node = key, Audio = audio, Start = os.clock(), Duration = duration, Position = position }
-
-	task.spawn(function()
-		while currentGather and currentGather.Token == token and os.clock() - currentGather.Start < duration do
+local collectRemote = remotes:FindFirstChild("CollectResource")
+if collectRemote then
+	collectRemote.OnClientEvent:Connect(function(kind, data)
+		if kind == "Hit" and type(data) == "table" and data.Key then
+			lastGatherKey, lastGatherPosition, lastGatherTime = data.Key, data.Position, os.clock()
+			local audio = audioForNode(data.Key)
 			if #audio.Hit > 0 then
-				play(audio.Hit[math.random(#audio.Hit)], position)
+				play(audio.Hit[math.random(#audio.Hit)], data.Position)
 			end
-			task.wait(cfg.HitInterval)
+		elseif kind == "Done" then
+			if lastGatherKey then
+				for _, name in audioForNode(lastGatherKey).Done do
+					play(name, lastGatherPosition)
+				end
+			end
+			lastGatherTime = os.clock()
+			lastGatherKey = nil
+		elseif kind == "Cancel" or kind == "Denied" then
+			lastGatherKey = nil
 		end
 	end)
 end
 
-ProximityPromptService.PromptTriggered:Connect(function(prompt, who)
-	if who == player then
-		startGather(prompt)
-	end
-end)
-
 ----------------------------------------------------------------------
--- Itens recebidos
+-- Itens recebidos de outras formas (ex: recolher do chão)
 ----------------------------------------------------------------------
 local previousItems = nil
 local inventoryRemote = remotes:WaitForChild("UpdateInventory")
 inventoryRemote.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" or type(data.Items) ~= "table" then return end
-	if previousItems then
-		local gainedItem
+	if previousItems and os.clock() - lastGatherTime > 3 then
 		for id, count in data.Items do
 			if count > (previousItems[id] or 0) then
-				gainedItem = id
-				break
-			end
-		end
-		if gainedItem then
-			local gather = currentGather
-			if gather and os.clock() - gather.Start < gather.Duration + 3 then
-				-- veio de uma coleta: toca o som de conclusão do recurso e para as pancadas
-				currentGather = nil
-				for _, name in gather.Audio.Done do
-					play(name, gather.Position)
-				end
-			else
-				local name = cfg.ItemPickup[gainedItem]
+				local name = cfg.ItemPickup[id]
 				if name then play(name) end
+				break
 			end
 		end
 	end

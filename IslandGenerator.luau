@@ -48,6 +48,7 @@ local folders = {}
 local Center, Sea, Depth, R
 local N, W, originX, originZ, bottomY, ny, minRel, HALF
 local VOL = nil -- dados do vulcão (nil se desligado)
+local CAVES = {} -- cavernas planejadas { Spheres, Chambers, Bounds }
 
 ----------------------------------------------------------------------
 -- Matemática
@@ -132,7 +133,7 @@ local function heightAt(x, z)
 
 	local base
 	if e <= 0 then
-		base = math.max(-6 + e * 45, minRel)
+		base = math.max(-6 + e * 120, minRel)
 	else
 		base = -6 + 14 * smoothstep(0, 0.4, e)
 	end
@@ -203,6 +204,46 @@ local function computeHeights()
 	end
 end
 
+-- Entalha as cavernas nos voxels do pedaço (esferas sobrepostas, bordas suaves)
+local function carveCaves(mats, occs, i0, j0, nx, nz)
+	if #CAVES == 0 then return end
+	local minX = originX + i0 * STEP
+	local minZ = originZ + j0 * STEP
+	local maxX, maxZ = minX + nx * STEP, minZ + nz * STEP
+	for _, cave in CAVES do
+		local b = cave.Bounds
+		if b.MaxX > minX and b.MinX < maxX and b.MaxZ > minZ and b.MinZ < maxZ then
+			for _, sp in cave.Spheres do
+				local sx, sy, sz, sr = sp[1], Sea + sp[2], sp[3], sp[4]
+				if sx + sr + STEP > minX and sx - sr - STEP < maxX and sz + sr + STEP > minZ and sz - sr - STEP < maxZ then
+					local x0 = math.max(1, math.floor((sx - sr - STEP - minX) / STEP) + 1)
+					local x1 = math.min(nx, math.ceil((sx + sr + STEP - minX) / STEP))
+					local z0 = math.max(1, math.floor((sz - sr - STEP - minZ) / STEP) + 1)
+					local z1 = math.min(nz, math.ceil((sz + sr + STEP - minZ) / STEP))
+					local y0 = math.max(1, math.floor((sy - sr - STEP - bottomY) / STEP) + 1)
+					local y1 = math.min(ny, math.ceil((sy + sr + STEP - bottomY) / STEP))
+					for xi = x0, x1 do
+						local wx = minX + (xi - 0.5) * STEP
+						for zi = z0, z1 do
+							local wz = minZ + (zi - 0.5) * STEP
+							for yi = y0, y1 do
+								local wy = bottomY + (yi - 0.5) * STEP
+								local dx, dy, dz = wx - sx, wy - sy, wz - sz
+								local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+								local keep = math.clamp((d - sr) / STEP + 0.5, 0, 1) -- 0 dentro da caverna, 1 fora
+								if keep < occs[xi][yi][zi] then
+									occs[xi][yi][zi] = keep
+									if keep <= 0 then mats[xi][yi][zi] = MAT.Air end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 local function writeChunk(i0, j0, nx, nz)
 	local mats, occs = table.create(nx), table.create(nx)
 	for xi = 1, nx do
@@ -244,6 +285,8 @@ local function writeChunk(i0, j0, nx, nz)
 		end
 	end
 
+	carveCaves(mats, occs, i0, j0, nx, nz)
+
 	local min = Vector3.new(originX + i0 * STEP, bottomY, originZ + j0 * STEP)
 	local max = min + Vector3.new(nx * STEP, ny * STEP, nz * STEP)
 	Workspace.Terrain:WriteVoxels(Region3.new(min, max), STEP, mats, occs)
@@ -253,8 +296,19 @@ local function writeTerrain()
 	local chunk = MapC.Chunk
 	for i0 = 0, N - 1, chunk do
 		for j0 = 0, N - 1, chunk do
-			writeChunk(i0, j0, math.min(chunk, N - i0), math.min(chunk, N - j0))
-			task.wait()
+			local cnx, cnz = math.min(chunk, N - i0), math.min(chunk, N - j0)
+			local maxH = -math.huge
+			for ci = i0, i0 + cnx + 1 do
+				for cj = j0, j0 + cnz + 1 do
+					local h = Hget(ci, cj)
+					if h > maxH then maxH = h end
+				end
+			end
+			-- só mar profundo e plano: o oceano do MapService já cobre, não precisa escrever nada
+			if maxH > minRel + 0.6 then
+				writeChunk(i0, j0, cnx, cnz)
+				task.wait()
+			end
 		end
 	end
 end
@@ -990,6 +1044,160 @@ local function buildVolcano()
 	reserve(VOL.X, VOL.Z, 12)
 end
 
+----------------------------------------------------------------------
+-- Trilhas (caminhos suaves nas montanhas) aplicadas na malha de alturas
+----------------------------------------------------------------------
+local function carveTrail(cx, cz, r0, r1, theta0, topRel)
+	local T = Cfg.Trails
+	local samples = 420
+	local rad = math.ceil(T.Width / STEP)
+	local startH
+	for k = 0, samples do
+		local t = k / samples
+		local r = r0 + (r1 - r0) * t
+		local theta = theta0 + T.Turns * 2 * math.pi * t
+		local x, z = cx + math.cos(theta) * r, cz + math.sin(theta) * r
+		local natural = gridHeight(x, z)
+		if natural then
+			if not startH then startH = math.max(6, natural) end
+			local targetH = startH + (topRel - startH) * t
+			local ci = math.floor((x - originX) / STEP + 0.5)
+			local cj = math.floor((z - originZ) / STEP + 0.5)
+			for di = -rad, rad do
+				for dj = -rad, rad do
+					local gi, gj = ci + di, cj + dj
+					if gi >= 0 and gj >= 0 and gi <= N + 1 and gj <= N + 1 then
+						local d = math.sqrt(di * di + dj * dj) * STEP
+						if d <= T.Width then
+							local w = 1 - smoothstep(T.Width * 0.45, T.Width, d)
+							local idx = gi * W + gj + 1
+							H[idx] = H[idx] + (targetH - H[idx]) * w
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local function applyTrails()
+	local T = Cfg.Trails
+	if not T or not T.Enabled then return end
+	if VOL then
+		local rim = volcanoHeight(VOL.X + VOL.CraterRadius * 1.12, VOL.Z) + 8
+		carveTrail(VOL.X, VOL.Z, VOL.Radius * 1.02, VOL.CraterRadius * 1.12, rng:NextNumber(0, 6.28), rim)
+		carveTrail(VOL.X, VOL.Z, VOL.Radius * 1.02, VOL.CraterRadius * 1.12, rng:NextNumber(0, 6.28), rim)
+	end
+	local peakH = gridHeight(peak.X, peak.Z) or 120
+	local sigma = R * 0.23
+	carveTrail(peak.X, peak.Z, sigma * 1.1, sigma * 0.08, rng:NextNumber(0, 6.28), peakH)
+	carveTrail(peak.X, peak.Z, sigma * 1.1, sigma * 0.08, rng:NextNumber(0, 6.28), peakH)
+end
+
+----------------------------------------------------------------------
+-- Cavernas: planejamento, consulta e recursos
+----------------------------------------------------------------------
+local function planCaves()
+	CAVES = {}
+	local C = Cfg.Caves
+	if not C or C.Count <= 0 then return end
+	local tries = 0
+	while #CAVES < C.Count and tries < 600 do
+		tries += 1
+		local x, z = randomInDisc(R * 0.9)
+		local h = gridHeight(x, z)
+		if h and h >= C.MinEntranceHeight and h <= C.MaxEntranceHeight then
+			-- direção "para dentro da montanha": a que sobe mais
+			local bestDir, bestH = nil, h
+			for k = 0, 7 do
+				local a = k * math.pi / 4
+				local hh = gridHeight(x + math.cos(a) * 45, z + math.sin(a) * 45)
+				if hh and hh > bestH then bestH, bestDir = hh, a end
+			end
+			if bestDir and bestH > h + 10 then
+				local spheres, chambers = {}, {}
+				local heading = bestDir
+				local px, pz, py = x, z, h - 3
+				local ok = true
+				for i = 1, C.Length do
+					heading += math.noise(i * 0.37, x * 0.01, z * 0.01) * 0.8
+					px += math.cos(heading) * C.Step
+					pz += math.sin(heading) * C.Step
+					local ground = gridHeight(px, pz)
+					if not ground then ok = false break end
+					py = py - C.Descent + math.noise(i * 0.5, px * 0.02, pz * 0.02) * 1.2
+					-- o teto fica sempre 14+ studs abaixo da superfície (menos na entrada, que abre para fora)
+					local ceiling = (i <= 2) and (ground - 2) or (ground - 14)
+					if py > ceiling then py = ceiling end
+					if py < 4 then py = 4 end
+					table.insert(spheres, { px, py, pz, C.TunnelRadius })
+					if i % C.ChamberEvery == 0 or i == C.Length then
+						local cr = rng:NextNumber(C.ChamberRadius[1], C.ChamberRadius[2])
+						table.insert(spheres, { px, py, pz, cr })
+						table.insert(chambers, { px, py, pz, cr })
+					end
+				end
+				if ok and #chambers >= 2 then
+					local b = { MinX = math.huge, MaxX = -math.huge, MinZ = math.huge, MaxZ = -math.huge }
+					for _, sp in spheres do
+						b.MinX = math.min(b.MinX, sp[1] - sp[4])
+						b.MaxX = math.max(b.MaxX, sp[1] + sp[4])
+						b.MinZ = math.min(b.MinZ, sp[3] - sp[4])
+						b.MaxZ = math.max(b.MaxZ, sp[3] + sp[4])
+					end
+					table.insert(CAVES, { Spheres = spheres, Chambers = chambers, Bounds = b, Entrance = Vector3.new(x, Sea + h, z) })
+				end
+			end
+		end
+	end
+end
+
+function Generator.IsInCave(position)
+	for _, cave in CAVES do
+		local b = cave.Bounds
+		if position.X > b.MinX and position.X < b.MaxX and position.Z > b.MinZ and position.Z < b.MaxZ then
+			for _, sp in cave.Spheres do
+				local dx, dy, dz = position.X - sp[1], position.Y - (Sea + sp[2]), position.Z - sp[3]
+				local r = sp[4] + 1
+				if dx * dx + dy * dy + dz * dz < r * r then return true end
+			end
+		end
+	end
+	return false
+end
+
+function Generator.GetCaves()
+	return CAVES
+end
+
+local function placeCaveResources()
+	local C = Cfg.Caves
+	if not C then return 0 end
+	local placed = 0
+	for _, cave in CAVES do
+		for _, chamber in cave.Chambers do
+			local cx, cy, cz, cr = chamber[1], Sea + chamber[2], chamber[3], chamber[4]
+			for key, count in C.OrePerChamber do
+				for _ = 1, count do
+					for _ = 1, 14 do
+						local a = rng:NextNumber(0, math.pi * 2)
+						local d = rng:NextNumber(cr * 0.15, cr * 0.7)
+						local x, z = cx + math.cos(a) * d, cz + math.sin(a) * d
+						local hit = Workspace:Raycast(Vector3.new(x, cy + cr * 0.5, z), Vector3.new(0, -cr * 1.6, 0), rayParams)
+						if hit and hit.Normal.Y > 0.55 and hit.Position.Y > cy - cr and isFree(x, z, 4) then
+							reserve(x, z, 4)
+							addMarker(pickKey(key), hit.Position, folders.Markers)
+							placed += 1
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+	return placed
+end
+
 local function placeWells()
 	local placed = {}
 	local spacing = Cfg.Wells.MinSpacing
@@ -1180,7 +1388,7 @@ local function buildInfiniteSea(parent)
 	local extent = C.Extent
 	local TILE = 2000
 	local top = Sea - 0.05
-	local water = Workspace.Terrain.WaterColor:Lerp(Color3.fromRGB(10, 50, 85), 0.35)
+	local water = C.TileColor or Workspace.Terrain.WaterColor:Lerp(Color3.fromRGB(10, 50, 85), 0.35)
 
 	local folder = Instance.new("Folder")
 	folder.Name = "InfiniteSea"
@@ -1226,9 +1434,9 @@ local function buildInfiniteSea(parent)
 		atmosphere = Instance.new("Atmosphere")
 		atmosphere.Parent = Lighting
 	end
-	atmosphere.Density = 0.26
-	atmosphere.Offset = 0.12
-	atmosphere.Haze = 1.4
+	atmosphere.Density = 0.34
+	atmosphere.Offset = 0.1
+	atmosphere.Haze = 1.8
 	atmosphere.Glare = 0.1
 	print(("[IslandGenerator] Mar infinito: %d planos de água."):format(count))
 end
@@ -1283,6 +1491,8 @@ function Generator.Start()
 	rayParams.FilterDescendantsInstances = { Workspace.Terrain }
 
 	computeHeights()
+	applyTrails()
+	planCaves()
 	writeTerrain()
 	task.wait(1)
 
@@ -1304,6 +1514,7 @@ function Generator.Start()
 	end
 	buildInfiniteSea(folders.Root)
 	placeWells()
+	local caveNodes = placeCaveResources()
 
 	local areaScale = (R / Cfg.BaseRadius) ^ 2 * Cfg.CountMultiplier
 	local total = 0
@@ -1327,8 +1538,8 @@ function Generator.Start()
 	end)
 
 	Generator.Ready = true
-	print(("[IslandGenerator] Ilha pronta (seed %d) em %.1fs | raio %d | recursos: %d | poços: %d | pontes: %d | vulcão: %s"):format(
-		seed, os.clock() - t0, R, total, #Generator.Wells, #folders.Bridges:GetChildren(), Generator.Volcano and "sim" or "não"))
+	print(("[IslandGenerator] Ilha pronta (seed %d) em %.1fs | raio %d | recursos: %d | poços: %d | pontes: %d | cavernas: %d (%d minérios) | vulcão: %s"):format(
+		seed, os.clock() - t0, R, total, #Generator.Wells, #folders.Bridges:GetChildren(), #CAVES, caveNodes, Generator.Volcano and "sim" or "não"))
 end
 
 return Generator

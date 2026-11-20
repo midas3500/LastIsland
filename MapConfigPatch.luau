@@ -1,18 +1,18 @@
 --[[
-	MapConfigPatch
+	MapConfigPatch (v5)
 	Local: ReplicatedStorage > Modules > MapConfigPatch   (ModuleScript, ao lado do MapConfig)
 
-	Como usar: no FINAL do MapConfig.luau, ANTES do "return MapConfig", adicione:
+	No FINAL do MapConfig.luau, ANTES do "return MapConfig":
 
 		require(script.Parent.MapConfigPatch)(MapConfig)
 
-	O que faz (sem precisar saber os valores atuais do seu MapConfig):
-	  - ilha central maior (IslandGenConfig.Map.Radius)
-	  - ilhas dos jogadores mais longe (IslandGenConfig.World.BridgeGap de mar entre as costas)
-	  - lobby e oceano reposicionados/aumentados para tudo caber
-	  - mar mais fundo (IslandGenConfig.World.OceanDepth)
-	  - ilhas dos jogadores e lobby maiores
-	  - remove TODAS as pontes e desliga a ilha low-poly e o FAROL de torre vermelha do MapService
+	O que faz (sem precisar conhecer os valores atuais do seu MapConfig):
+	  - ilhas dos jogadores DINÂMICAS (criadas uma por jogador; nada de 12 ilhas esperando)
+	  - lobby REMOVIDO
+	  - ilha central gigante (IslandGenConfig.Map.Radius) e ilhas dos jogadores maiores
+	  - círculo das ilhas dos jogadores afastado da ilha central (IslandGenConfig.World.BridgeGap)
+	  - mar mais fundo e oceano grande o bastante para tudo
+	  - sem pontes, sem ilha low-poly e sem o farol de torre vermelha do MapService
 ]]
 
 return function(MapConfig)
@@ -20,16 +20,15 @@ return function(MapConfig)
 
 	local main = MapConfig.MainIsland
 	local pl = MapConfig.PlayerIslands
-	local lobby = MapConfig.Lobby
 	local ocean = MapConfig.Ocean
 
-	-- raio externo de uma ilha em prisma (maior camada)
 	local function outer(cfg)
 		local first = cfg.Tiers and cfg.Tiers[1]
 		return cfg.Radius * ((first and first.Scale) or 1)
 	end
 
-	-- Ilhas dos jogadores maiores (raio, área de construção e quantidade de recursos)
+	-- Ilhas dos jogadores: dinâmicas e maiores
+	pl.Dynamic = true
 	local k = G.World.PlayerIslandScale or 1
 	if k ~= 1 then
 		pl.Radius = pl.Radius * k
@@ -38,39 +37,32 @@ return function(MapConfig)
 		if type(counts) == "table" then
 			for name, value in counts do
 				if type(value) == "number" then
-					counts[name] = math.ceil(value * k * k * 0.8)
+					counts[name] = math.ceil(value * k * k * 0.7)
 				end
 			end
 		end
 	end
-	local lk = G.World.LobbyScale or 1
-	if lk ~= 1 then lobby.Radius = lobby.Radius * lk end
+
+	-- Lobby removido
+	if MapConfig.Lobby then MapConfig.Lobby.Enabled = false end
 
 	-- Ilha central (a costa irregular chega a ~1.3x o raio)
 	main.Radius = G.Map.Radius
-	main.Enabled = false -- o MapService não constrói mais a ilha low-poly (veja PATCHES.md)
+	main.Enabled = false -- o MapService não constrói mais a ilha low-poly (veja INSTALAR.md)
 	local mainOuter = G.Map.Radius * 1.3
 
-	-- Ilhas dos jogadores em círculo, bem mais longe
+	-- Círculo onde as ilhas dos jogadores nascem
 	local plOuter = outer(pl)
 	pl.Center = main.Position
 	pl.RingRadius = mainOuter + plOuter + G.World.BridgeGap
-	-- deixa um vão exatamente no eixo -Z (é onde fica o lobby)
-	pl.AngleOffsetDeg = -90 + 180 / pl.Count
+	pl.AngleOffsetDeg = -90 -- ângulo da 1ª ilha; as seguintes vão para o lado oposto
 
-	-- Lobby no eixo -Z, entre a ilha central e o círculo
-	local lobbyOuter = outer(lobby)
-	local lobbyDist = mainOuter + lobbyOuter + G.World.LobbyGap
-	lobby.Position = Vector3.new(main.Position.X, lobby.Position.Y, main.Position.Z - lobbyDist)
-
-	-- Mar mais fundo (só aumenta)
+	-- Mar mais fundo (só aumenta) e oceano que cobre o círculo das ilhas + margem
 	ocean.Depth = math.max(ocean.Depth, G.World.OceanDepth)
-
-	-- Oceano grande o bastante para tudo
-	local needed = math.max(pl.RingRadius + plOuter, lobbyDist + lobbyOuter) + G.World.OceanMargin
+	local needed = pl.RingRadius + plOuter + G.World.OceanMargin
 	ocean.Size = math.max(ocean.Size, math.ceil(needed * 2 / 256) * 256)
 
-	-- Sem pontes: o mapa todo é atravessado nadando (ou de barco, no futuro)
+	-- Sem pontes
 	MapConfig.Bridges.PlayerIslandsToMain = false
 	MapConfig.Bridges.LobbyToMain = false
 end

@@ -141,4 +141,3 @@ function UIFx.BindAll(container)
 end
 
 return UIFx
-

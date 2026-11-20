@@ -31,6 +31,8 @@ GameConfig.ServiceLoadOrder = {
 	"ToolUpgradeService",
 	"ResourceService",
 	"SurvivalService",
+	"TemperatureService",
+	"FallDamageService",
 	"BuildingService",
 	"EventService",
 	"QuestService",

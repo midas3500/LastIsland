@@ -115,7 +115,6 @@ local function createToolInstance(toolName, tier)
 		return nil
 	end
 
-	-- Identificação usada pelos outros sistemas do jogo.
 	tool:SetAttribute("ToolType", toolName)
 	tool:SetAttribute("ToolTier", tier)
 
@@ -322,11 +321,30 @@ local function checkSession(session)
 		return false, "Você foi derrotado."
 	end
 
+	-- DISTÂNCIA DO RECURSO
+
 	local maxDistance = (record.Def.MaxDistance or Cfg.DefaultMaxDistance) + (Cfg.DistanceTolerance or 0)
 
 	if (root.Position - record.Root.Position).Magnitude > maxDistance then
 		return false, "Você se afastou demais."
 	end
+
+	-- CANCELAR SE O JOGADOR SE MOVIMENTAR
+
+	if not session.StartPos then
+		session.StartPos = root.Position
+	end
+
+	local dx = root.Position.X - session.StartPos.X
+	local dz = root.Position.Z - session.StartPos.Z
+
+	local maxMoveDistance = Cfg.MaxMoveDistance or 3.5
+
+	if dx * dx + dz * dz > maxMoveDistance ^ 2 then
+		return false, "Você se moveu. Coleta cancelada."
+	end
+
+	-- VERIFICAR DISPONIBILIDADE
 
 	if record.State ~= "Ready" then
 		return false, "O recurso não está mais disponível."
@@ -441,6 +459,15 @@ local function runSession(session)
 		task.delay(Cfg.HitDelay or 0.3, function()
 			if sessions[session.Player] == session then
 				hitEffect(session.Record)
+
+				-- EVENTO HIT ENVIADO AO CLIENTE
+
+				if session.Player.Parent then
+					remote:FireClient(session.Player, "Hit", {
+						Key = session.Record.Key,
+						Position = session.Record.Root.Position,
+					})
+				end
 			end
 		end)
 
@@ -568,6 +595,9 @@ local function startGather(player, record)
 		Yield = toolYield,
 		Tier = tier,
 		Tool = nil,
+
+		-- POSIÇÃO INICIAL DO JOGADOR
+		StartPos = root.Position,
 	}
 
 	sessions[player] = session
@@ -776,63 +806,72 @@ function ResourceService.Debug_TryGather(player, nodeModel)
 
 	return startGather(player, record)
 end
--- Cria um recurso em tempo de execução (usado pelos eventos da ilha)
+
+-- CRIAR RECURSO EM TEMPO DE EXECUÇÃO
+
 function ResourceService.SpawnAtMarker(marker)
 	local templates = ServerStorage:FindFirstChild("ResourceModels")
-	if not templates then return nil end
-	local before = #nodeList
-	if createNode(marker, templates) and #nodeList > before then
-		return nodeList[#nodeList].Model
-	end
-	return nil
-end
 
-function ResourceService.RemoveNode(model)
-	local record = nodes[model]
-	if not record then return end
-	record.State = "Removed"
-	record.RespawnToken = nil
-	if record.Prompt then record.Prompt.Enabled = false end
-	nodes[model] = nil
-	for i, r in ipairs(nodeList) do
-		if r == record then table.remove(nodeList, i) break end
-	end
-	model:Destroy()
-end
-
-
-function ResourceService.Init()
-	function ResourceService.SpawnAtMarker(marker)
-		local templates = ServerStorage:FindFirstChild("ResourceModels")
-		if not templates then return nil end
-		local before = #nodeList
-		if createNode(marker, templates) and #nodeList > before then
-			return nodeList[#nodeList].Model
-		end
+	if not templates then
 		return nil
 	end
 
-	function ResourceService.RemoveNode(model)
-		local record = nodes[model]
-		if not record then return end
-		record.State = "Removed"
-		record.RespawnToken = nil
-		if record.Prompt then record.Prompt.Enabled = false end
-		nodes[model] = nil
-		for i, r in ipairs(nodeList) do
-			if r == record then table.remove(nodeList, i) break end
-		end
-		model:Destroy()
+	local before = #nodeList
+
+	if createNode(marker, templates) and #nodeList > before then
+		return nodeList[#nodeList].Model
 	end
+
+	return nil
+end
+
+-- REMOVER RECURSO
+
+function ResourceService.RemoveNode(model)
+	local record = nodes[model]
+
+	if not record then
+		return
+	end
+
+	record.State = "Removed"
+	record.RespawnToken = nil
+
+	if record.Prompt then
+		record.Prompt.Enabled = false
+	end
+
+	if record.User then
+		local session = sessions[record.User]
+
+		if session then
+			cancelSession(session, "Este recurso foi removido.")
+		end
+	end
+
+	nodes[model] = nil
+
+	for i, r in ipairs(nodeList) do
+		if r == record then
+			table.remove(nodeList, i)
+			break
+		end
+	end
+
+	model:Destroy()
+end
+
+function ResourceService.Init()
+	-- Mantido para compatibilidade com o carregamento dos serviços.
 end
 
 -- INICIALIZAÇÃO
-
 
 function ResourceService.Start()
 	remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CollectResource")
 
 	-- TEMPLATES
+
 	local templates = ServerStorage:FindFirstChild("ResourceModels")
 
 	if not templates then
@@ -844,12 +883,17 @@ function ResourceService.Start()
 	local created = ResourceModelBuilder.EnsureTemplates(templates)
 
 	-- TEMPLATES DOS RECURSOS DA ILHA
+
 	local okGen, IslandGenerator = pcall(require, script.Parent:WaitForChild("IslandGenerator"))
-	if okGen then IslandGenerator.EnsureTemplates(templates) end
+
+	if okGen then
+		IslandGenerator.EnsureTemplates(templates)
+	end
 
 	log(created, "modelo(s) de recurso criado(s).")
 
 	-- MARCADORES DO MAPA
+
 	local mapFolder = Workspace:FindFirstChild(MapConfig.Folders.Map)
 
 	local spawnsRoot = mapFolder
@@ -875,6 +919,7 @@ function ResourceService.Start()
 	log(total, "recursos criados no mapa.")
 
 	-- CANCELAMENTO PELO CLIENTE
+
 	remote.OnServerEvent:Connect(function(player, action)
 		if action ~= "Cancel" then
 			return
@@ -895,6 +940,8 @@ function ResourceService.Start()
 			cancelSession(session, "Coleta cancelada.")
 		end
 	end)
+
+	-- LIMPEZA AO SAIR
 
 	Players.PlayerRemoving:Connect(function(player)
 		local session = sessions[player]

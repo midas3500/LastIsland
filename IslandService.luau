@@ -1,40 +1,35 @@
 --[[
-	IslandService
-	Local: ServerScriptService > Services > IslandService
+	IslandService (v2 — ilhas DINÂMICAS)
+	Local: ServerScriptService > Services > IslandService   (SUBSTITUI o atual)
 
-	Atribui uma das 12 ilhas a cada jogador, protege a posse da ilha, mostra o dono,
-	reserva a ilha para reconexão e a libera quando a reserva expira.
+	Uma ilha individual para cada jogador conectado, criada na hora:
+	  - 1 jogador = 1 ilha, 2 jogadores = 2 ilhas, 5 jogadores = 5 ilhas
+	  - as ilhas ficam o mais longe possível umas das outras (extremidades opostas do círculo)
+	  - quando alguém sai, a ilha é reservada pelo tempo de reconexão e depois DESTRUÍDA
+	  - reconectou dentro do prazo: volta para a MESMA ilha (nunca duplica)
+	  - não existe mais fila de espera nem lobby
 
-	ESTADOS DE UMA ILHA
-		Free      : sem dono
-		Occupied  : dono online
-		Reserved  : dono saiu; ilha guardada por Islands.ReconnectGraceSeconds
+	ESTADOS: Occupied (dono online) | Reserved (dono saiu; guardada por Islands.ReconnectGraceSeconds)
 
-	SIMULTANEIDADE
-		A função claim() NÃO tem pausas (task.wait, WaitForChild, DataStore...). Em Luau, código sem
-		pausas nunca é interrompido por outro script, então duas entradas nunca escolhem a mesma ilha.
+	SIMULTANEIDADE: a escolha da posição/índice (claim) não tem pausas, então duas entradas ao mesmo
+	tempo nunca escolhem o mesmo lugar. A construção da ilha roda depois, em outra thread.
 
-	API PARA OUTROS SERVIÇOS
-		IslandService.GetIslandOf(player)            -> info da ilha do jogador (ou nil)
-		IslandService.GetIslandByIndex(index)        -> info
-		IslandService.GetIslandAt(position)          -> info da ilha que contém a posição (ou nil)
-		IslandService.IsOwner(player, index)         -> boolean
-		IslandService.CanBuildAt(player, position)   -> ok, motivo
-		IslandService.CanBuildBox(player, cframe, size) -> ok, motivo
-		IslandService.TeleportToIsland(player)
-		IslandService.OnAssigned(function(player, info, motivo) end)
-		IslandService.OnReleased(function(info, ownerUserIdAnterior, motivo) end)
+	API (a mesma de antes):
+	  GetIslandOf(player) / GetIslandByIndex(i) / GetIslandAt(pos) / IsOwner(player, i)
+	  CanBuildAt(player, pos) / CanBuildBox(player, cframe, size) / TeleportToIsland(player)
+	  OnAssigned(function(player, info, motivo)) / OnReleased(function(info, donoAnterior, motivo))
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local GameConfig = require(Modules:WaitForChild("GameConfig"))
-
+local MapConfig = require(Modules:WaitForChild("MapConfig"))
 local Cfg = GameConfig.Islands
 if not Cfg then
-	error("[IslandService] GameConfig.Islands não existe. Faça o passo 1.2 da Etapa 2 (editar o GameConfig).")
+	error("[IslandService] GameConfig.Islands não existe.")
 end
 
 local MapService = require(script.Parent:WaitForChild("MapService"))
@@ -42,22 +37,17 @@ local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService"
 
 local IslandService = {}
 
--- ===========================================================================
--- ESTADO (somente o servidor altera)
--- ===========================================================================
-
-local states = {}          -- [indice] = estado da ilha
-local ownerByUserId = {}   -- [UserId] = indice (inclui ilhas reservadas)
-local waiting = {}         -- fila de jogadores sem ilha: { Player, Data }
+local states = {}         -- [indice] = estado da ilha
+local ownerByUserId = {}  -- [UserId] = indice (inclui ilhas reservadas)
 local assignedCallbacks = {}
 local releasedCallbacks = {}
 
-local processWaiting -- declarada aqui, definida mais abaixo
+local MAX_ISLANDS = Cfg.MaxDynamicIslands or 48
+local BUILD_RETRIES = 3
 
--- ===========================================================================
--- UTILITÁRIOS
--- ===========================================================================
-
+----------------------------------------------------------------------
+-- Utilitários
+----------------------------------------------------------------------
 local function log(...)
 	if GameConfig.Debug then
 		print("[IslandService]", ...)
@@ -83,7 +73,18 @@ local function displayNameOf(player)
 	return player.Name
 end
 
--- Cópia somente-leitura das informações da ilha (os outros serviços nunca recebem o estado interno)
+local function angleDiff(a, b)
+	return math.abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+end
+
+local function tierByName(tiers, name)
+	for _, tier in ipairs(tiers) do
+		if tier.Name == name then return tier end
+	end
+	error("Tier não encontrado no MapConfig: " .. tostring(name))
+end
+
+-- Cópia somente-leitura das informações da ilha
 local function publicInfo(state)
 	local slot = state.Slot
 	return {
@@ -101,15 +102,30 @@ local function publicInfo(state)
 	}
 end
 
--- ===========================================================================
--- VISUAL (placa, etiqueta e atributos)
--- ===========================================================================
+-- Dados da ilha calculados ANTES de ela existir (iguais aos que o MapService vai gerar)
+local function placeholderSlot(index, center)
+	local pcfg = MapConfig.PlayerIslands
+	local ground = tierByName(pcfg.Tiers, pcfg.GroundTier)
+	local groundY = ground.Top
+	local apothem = pcfg.Radius * ground.Scale * math.cos(math.pi / MapConfig.Style.PrismSides)
+	return {
+		Index = index,
+		Name = string.format("Island_%02d", index),
+		Model = nil,
+		Center = Vector3.new(center.X, groundY, center.Z),
+		SpawnCFrame = CFrame.new(center.X, groundY + 3, center.Z),
+		Radius = pcfg.Radius,
+		BuildRadius = apothem * 0.95,
+		GroundY = groundY,
+	}
+end
 
+----------------------------------------------------------------------
+-- Visual (placa, etiqueta e atributos)
+----------------------------------------------------------------------
 local function createTag(slot)
-	local anchor = slot.Model:FindFirstChild("SpawnPoint")
-	if not anchor then
-		return nil, nil
-	end
+	local anchor = slot.Model and slot.Model:FindFirstChild("SpawnPoint")
+	if not anchor then return nil, nil end
 
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "OwnerTag"
@@ -131,16 +147,12 @@ local function createTag(slot)
 	label.TextScaled = true
 	label.Text = ""
 	label.Parent = gui
-
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 10)
 	corner.Parent = label
-
 	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 8)
-	padding.PaddingRight = UDim.new(0, 8)
-	padding.PaddingTop = UDim.new(0, 6)
-	padding.PaddingBottom = UDim.new(0, 6)
+	padding.PaddingLeft, padding.PaddingRight = UDim.new(0, 8), UDim.new(0, 8)
+	padding.PaddingTop, padding.PaddingBottom = UDim.new(0, 6), UDim.new(0, 6)
 	padding.Parent = label
 
 	gui.Parent = anchor
@@ -149,53 +161,127 @@ end
 
 local function refreshVisuals(state)
 	local model = state.Slot.Model
+	if not model then return end
 	model:SetAttribute("OwnerUserId", state.OwnerUserId)
 	model:SetAttribute("OwnerName", state.OwnerName)
 	model:SetAttribute("IslandState", state.State)
 
 	local text
-	if state.State == "Free" then
-		text = Cfg.FreeText
-	elseif state.State == "Reserved" then
+	if state.State == "Reserved" then
 		text = state.OwnerName .. Cfg.OfflineSuffix
 	else
 		text = state.OwnerName
 	end
-
 	if state.SubtitleLabel then
 		state.SubtitleLabel.Text = text
 	end
-
 	if state.TagGui then
-		state.TagGui.Enabled = state.State ~= "Free"
+		state.TagGui.Enabled = true
 		if state.TagLabel then
 			state.TagLabel.Text = string.format(Cfg.TagFormat, text)
 		end
 	end
 end
 
--- ===========================================================================
--- POSSE DA ILHA
--- ===========================================================================
+----------------------------------------------------------------------
+-- Construção e destruição das ilhas
+----------------------------------------------------------------------
+local function getResourceService()
+	local module = script.Parent:FindFirstChild("ResourceService")
+	if not module then return nil end
+	local ok, service = pcall(require, module) -- só em tempo de execução (evita require circular)
+	return ok and service or nil
+end
 
+local warnedNodes = false
+local function spawnNodes(state)
+	local resourceService = getResourceService()
+	if not resourceService or not resourceService.SpawnAtMarker then
+		if not warnedNodes then
+			warnedNodes = true
+			warn("[IslandService] ResourceService sem SpawnAtMarker: aplique o patch do ResourceService. As ilhas ficam sem recursos.")
+		end
+		return
+	end
+	local map = Workspace:FindFirstChild(MapConfig.Folders.Map)
+	local spawnsRoot = map and map:FindFirstChild(MapConfig.Folders.ResourceSpawns)
+	local folder = spawnsRoot and spawnsRoot:FindFirstChild(state.Slot.Name)
+	if not folder then return end
+	for _, marker in ipairs(folder:GetChildren()) do
+		if marker:IsA("BasePart") and marker:GetAttribute("ResourceType") then
+			local model = resourceService.SpawnAtMarker(marker)
+			if model then
+				table.insert(state.Nodes, model)
+			end
+		end
+	end
+end
+
+-- Coluna de areia do fundo do mar até a ilha (o mar é fundo, a ilha não pode ficar "flutuando")
+local function buildPedestal(slot)
+	local sea = MapConfig.WaterLevel
+	local bottom = sea - MapConfig.Ocean.Depth
+	local top = sea - 2
+	local diameter = slot.Radius * 1.5
+	local pedestal = Instance.new("Part")
+	pedestal.Name = "Pedestal"
+	pedestal.Shape = Enum.PartType.Cylinder
+	pedestal.Size = Vector3.new(top - bottom, diameter, diameter)
+	pedestal.CFrame = CFrame.new(slot.Center.X, (top + bottom) / 2, slot.Center.Z) * CFrame.Angles(0, 0, math.rad(90))
+	pedestal.Anchored = true
+	pedestal.CanCollide = false
+	pedestal.CanQuery = false
+	pedestal.CanTouch = false
+	pedestal.Material = Enum.Material.Sand
+	pedestal.Color = Color3.fromRGB(205, 182, 135)
+	pedestal.Parent = slot.Model
+end
+
+local function buildState(state)
+	local ok, slot = pcall(MapService.BuildIslandAt, state.Index, state.Center)
+	if not ok or not slot then
+		warn("[IslandService] Falha ao construir a ilha " .. state.Index .. ": " .. tostring(slot))
+		return false
+	end
+	state.Slot = slot
+	buildPedestal(slot)
+	state.SubtitleLabel = slot.Sign and slot.Sign:FindFirstChild("Subtitle", true) or nil
+	state.TagGui, state.TagLabel = createTag(slot)
+	spawnNodes(state)
+	state.Ready = true
+	return true
+end
+
+local function destroyState(state)
+	if states[state.Index] ~= state then return end
+	state.Destroyed = true
+	local resourceService = getResourceService()
+	for _, model in ipairs(state.Nodes) do
+		if model.Parent and resourceService and resourceService.RemoveNode then
+			pcall(resourceService.RemoveNode, model)
+		end
+	end
+	state.Nodes = {}
+	pcall(MapService.RemoveIsland, state.Index)
+	states[state.Index] = nil
+end
+
+----------------------------------------------------------------------
+-- Posse da ilha
+----------------------------------------------------------------------
 local function releaseSlot(state, reason)
+	if states[state.Index] ~= state then return end
 	local previousUserId = state.OwnerUserId
 	local previousName = state.OwnerName
-
-	if previousUserId ~= 0 then
+	if previousUserId ~= 0 and ownerByUserId[previousUserId] == state.Index then
 		ownerByUserId[previousUserId] = nil
 	end
-
-	state.State = "Free"
-	state.Player = nil
-	state.OwnerUserId = 0
-	state.OwnerName = ""
 	state.ReserveToken = nil
-	state.ReservedUntil = 0
-
-	refreshVisuals(state)
-	log(string.format("Ilha %02d LIBERADA (%s). Dono anterior: %s", state.Index, reason, previousName ~= "" and previousName or "-"))
-	fire(releasedCallbacks, publicInfo(state), previousUserId, reason)
+	local info = publicInfo(state)
+	info.State = "Free"
+	log(string.format("Ilha %02d REMOVIDA (%s). Dono anterior: %s", state.Index, reason, previousName ~= "" and previousName or "-"))
+	fire(releasedCallbacks, info, previousUserId, reason)
+	destroyState(state)
 end
 
 local function reserveSlot(state)
@@ -204,7 +290,6 @@ local function reserveSlot(state)
 		releaseSlot(state, "left")
 		return
 	end
-
 	local token = {}
 	state.State = "Reserved"
 	state.Player = nil
@@ -212,24 +297,43 @@ local function reserveSlot(state)
 	state.ReservedUntil = os.time() + grace
 	refreshVisuals(state)
 	log(string.format("Ilha %02d RESERVADA para %s por %ds", state.Index, state.OwnerName, grace))
-
-	-- Sem loop: um único timer por reserva. Se o dono voltar, o token muda e este timer não faz nada.
 	task.delay(grace, function()
 		if state.ReserveToken == token and state.State == "Reserved" then
 			releaseSlot(state, "expired")
-			processWaiting()
 		end
 	end)
 end
 
--- Escolhe a ilha do jogador. NÃO PODE TER PAUSAS (yields) aqui dentro.
--- Retorna (estado, motivo) ou nil se não houver ilha.
-local function claim(player, preferredIndex)
+-- Escolhe o ângulo mais distante das ilhas existentes (1ª ilha: ângulo base; 2ª: oposta; 3ª/4ª: a 90°...)
+local function pickAngle()
+	local base = math.rad(MapConfig.PlayerIslands.AngleOffsetDeg or -90)
+	local used = {}
+	for _, state in pairs(states) do
+		table.insert(used, state.Angle)
+	end
+	if #used == 0 then return base end
+	local best, bestScore = base, -1
+	local steps = 72
+	for i = 0, steps - 1 do
+		local angle = base + i * (2 * math.pi / steps)
+		local score = math.huge
+		for _, other in ipairs(used) do
+			score = math.min(score, angleDiff(angle, other))
+		end
+		if score > bestScore + 1e-6 then
+			best, bestScore = angle, score
+		end
+	end
+	return best
+end
+
+-- NÃO PODE TER PAUSAS (yields) aqui dentro.
+local function claim(player)
 	local userId = player.UserId
 
-	-- 1) Já é dono de uma ilha neste servidor (reconexão ou chamada repetida)
+	-- já é dono de uma ilha neste servidor (reconexão ou chamada repetida)
 	local ownedIndex = ownerByUserId[userId]
-	if ownedIndex then
+	if ownedIndex and states[ownedIndex] then
 		local state = states[ownedIndex]
 		state.State = "Occupied"
 		state.Player = player
@@ -239,175 +343,117 @@ local function claim(player, preferredIndex)
 		return state, "reconnected"
 	end
 
-	local chosen, how
-
-	-- 2) Ilha preferida (salva no perfil), se estiver livre
-	if type(preferredIndex) == "number" then
-		local candidate = states[preferredIndex]
-		if candidate and candidate.State == "Free" then
-			chosen = candidate
-			how = "preferred"
-		end
-	end
-
-	-- 3) Primeira ilha livre
-	if not chosen then
-		for index = 1, #states do
-			local candidate = states[index]
-			if candidate.State == "Free" then
-				chosen = candidate
-				how = "new"
-				break
-			end
-		end
-	end
-
-	-- 4) Sem ilhas livres: toma a reserva que expira primeiro
-	if not chosen then
-		local oldest = nil
-		for index = 1, #states do
-			local candidate = states[index]
-			if candidate.State == "Reserved" and (oldest == nil or candidate.ReservedUntil < oldest.ReservedUntil) then
-				oldest = candidate
-			end
-		end
-		if oldest then
-			releaseSlot(oldest, "evicted")
-			chosen = oldest
-			how = "evicted"
-		end
-	end
-
-	if not chosen then
+	local count = 0
+	for _ in pairs(states) do count += 1 end
+	if count >= MAX_ISLANDS then
 		return nil
 	end
 
-	chosen.State = "Occupied"
-	chosen.Player = player
-	chosen.OwnerUserId = userId
-	chosen.OwnerName = displayNameOf(player)
-	chosen.ReserveToken = nil
-	chosen.ReservedUntil = 0
-	ownerByUserId[userId] = chosen.Index
+	local index = 1
+	while states[index] do index += 1 end
 
-	return chosen, how
+	local angle = pickAngle()
+	local pcfg = MapConfig.PlayerIslands
+	local ringCenter = pcfg.Center or MapConfig.MainIsland.Position
+	local center = ringCenter + Vector3.new(math.cos(angle) * pcfg.RingRadius, 0, math.sin(angle) * pcfg.RingRadius)
+
+	local state = {
+		Index = index,
+		Angle = angle,
+		Center = center,
+		Slot = placeholderSlot(index, center),
+		State = "Occupied",
+		Player = player,
+		OwnerUserId = userId,
+		OwnerName = displayNameOf(player),
+		ReserveToken = nil,
+		ReservedUntil = 0,
+		Ready = false,
+		Destroyed = false,
+		Nodes = {},
+	}
+	states[index] = state
+	ownerByUserId[userId] = index
+	return state, "new"
 end
 
--- ===========================================================================
--- SPAWN NA ILHA
--- ===========================================================================
-
+----------------------------------------------------------------------
+-- Spawn na ilha
+----------------------------------------------------------------------
 local function teleportToIsland(player)
-	if not Cfg.SpawnOnIsland then
-		return
-	end
-
+	if not Cfg.SpawnOnIsland then return end
 	local index = ownerByUserId[player.UserId]
 	local state = index and states[index]
-	if not state or state.State ~= "Occupied" or state.Player ~= player then
-		return
-	end
+	if not state or not state.Ready or state.State ~= "Occupied" or state.Player ~= player then return end
 
 	local character = player.Character
-	if not character then
-		return
-	end
-
+	if not character then return end
 	local root = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
-	if not root or not character.Parent then
-		return
-	end
-
+	if not root or not character.Parent then return end
 	character:PivotTo(state.Slot.SpawnCFrame)
 end
 
--- ===========================================================================
--- ATRIBUIÇÃO
--- ===========================================================================
-
--- Também NÃO tem pausas (o teleporte roda em outra thread)
 local function finishAssign(player, data, state, how)
 	if data then
 		data.Island = data.Island or {}
 		data.Island.PreferredSlot = state.Index
 	end
-
 	refreshVisuals(state)
 	player:SetAttribute("IslandIndex", state.Index)
 	log(string.format("Ilha %02d -> %s (%d) [%s]", state.Index, state.OwnerName, state.OwnerUserId, how))
-
 	fire(assignedCallbacks, player, publicInfo(state), how)
 	task.spawn(teleportToIsland, player)
 end
 
-local function isWaiting(player)
-	for _, entry in ipairs(waiting) do
-		if entry.Player == player then
-			return true
-		end
-	end
-	return false
-end
+local function assignPlayer(player, data, attempt)
+	attempt = attempt or 1
+	if player.Parent == nil then return end
 
-local function assignPlayer(player, data)
-	if player.Parent == nil then
-		return
-	end
-
-	local preferred = data and data.Island and data.Island.PreferredSlot
-	local state, how = claim(player, preferred)
-
+	local state, how = claim(player)
 	if not state then
-		if not isWaiting(player) then
-			table.insert(waiting, { Player = player, Data = data })
-		end
+		warn(string.format("[IslandService] Limite de %d ilhas atingido; %s tentará de novo em 5s.", MAX_ISLANDS, player.Name))
 		player:SetAttribute("IslandIndex", 0)
-		warn(string.format("[IslandService] Sem ilha disponível para %s. Entrou na fila (posição %d).", player.Name, #waiting))
+		task.delay(5, function() assignPlayer(player, data, attempt) end)
 		return
 	end
 
-	finishAssign(player, data, state, how)
-end
-
-processWaiting = function()
-	while #waiting > 0 do
-		local entry = waiting[1]
-		if entry.Player.Parent == nil then
-			table.remove(waiting, 1)
-		else
-			local preferred = entry.Data and entry.Data.Island and entry.Data.Island.PreferredSlot
-			local state, how = claim(entry.Player, preferred)
-			if not state then
-				return
-			end
-			table.remove(waiting, 1)
-			finishAssign(entry.Player, entry.Data, state, how)
-		end
+	if state.Ready then
+		finishAssign(player, data, state, how)
+		return
 	end
+
+	-- constrói a ilha (fora do claim, pode demorar um pouco)
+	task.spawn(function()
+		if not buildState(state) then
+			-- falhou: remove o que sobrou e tenta de novo
+			if state.OwnerUserId ~= 0 and ownerByUserId[state.OwnerUserId] == state.Index then
+				ownerByUserId[state.OwnerUserId] = nil
+			end
+			destroyState(state)
+			if attempt < BUILD_RETRIES and player.Parent then
+				task.wait(2)
+				assignPlayer(player, data, attempt + 1)
+			else
+				warn("[IslandService] Não foi possível criar a ilha de " .. player.Name)
+			end
+			return
+		end
+		if state.Destroyed or player.Parent == nil or state.Player ~= player then
+			return -- o jogador saiu durante a construção (a reserva/expiração cuida da ilha)
+		end
+		finishAssign(player, data, state, how)
+	end)
 end
 
 local function onPlayerRemoving(player)
-	for index, entry in ipairs(waiting) do
-		if entry.Player == player then
-			table.remove(waiting, index)
-			break
-		end
-	end
-
 	player:SetAttribute("IslandIndex", 0)
-
 	local index = ownerByUserId[player.UserId]
-	if not index then
-		return
-	end
-
+	if not index then return end
 	local state = states[index]
-	if state.Player ~= player then
+	if not state or state.Player ~= player then
 		return -- esta ilha já pertence a uma nova conexão do mesmo jogador
 	end
-
 	reserveSlot(state)
-	processWaiting()
 end
 
 local function hookCharacter(player)
@@ -416,14 +462,13 @@ local function hookCharacter(player)
 	end)
 end
 
--- ===========================================================================
--- API PÚBLICA
--- ===========================================================================
-
+----------------------------------------------------------------------
+-- API pública
+----------------------------------------------------------------------
 function IslandService.GetIslandOf(player)
 	local index = ownerByUserId[player.UserId]
 	local state = index and states[index]
-	if state and state.State == "Occupied" and state.Player == player then
+	if state and state.Ready and state.State == "Occupied" and state.Player == player then
 		return publicInfo(state)
 	end
 	return nil
@@ -435,11 +480,8 @@ function IslandService.GetIslandByIndex(index)
 end
 
 function IslandService.GetIslandAt(position)
-	if typeof(position) ~= "Vector3" then
-		return nil
-	end
-	for index = 1, #states do
-		local state = states[index]
+	if typeof(position) ~= "Vector3" then return nil end
+	for _, state in pairs(states) do
 		local slot = state.Slot
 		local dx = position.X - slot.Center.X
 		local dz = position.Z - slot.Center.Z
@@ -455,8 +497,6 @@ function IslandService.IsOwner(player, index)
 	return info ~= nil and info.Index == index
 end
 
--- Validação de construção. SEMPRE chame no servidor, com a posição que o SERVIDOR calculou.
--- Retorna true, ou false + motivo.
 function IslandService.CanBuildAt(player, position)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, "Jogador inválido"
@@ -464,12 +504,10 @@ function IslandService.CanBuildAt(player, position)
 	if typeof(position) ~= "Vector3" or position.X ~= position.X or position.Y ~= position.Y or position.Z ~= position.Z then
 		return false, "Posição inválida"
 	end
-
 	local own = IslandService.GetIslandOf(player)
 	if not own then
 		return false, "Você ainda não tem uma ilha"
 	end
-
 	local dx = position.X - own.Center.X
 	local dz = position.Z - own.Center.Z
 	if dx * dx + dz * dz > own.BuildRadius * own.BuildRadius then
@@ -479,34 +517,21 @@ function IslandService.CanBuildAt(player, position)
 		end
 		return false, "Fora da área de construção da sua ilha"
 	end
-
 	if position.Y < own.GroundY - 2 or position.Y > own.GroundY + Cfg.MaxBuildHeight then
 		return false, "Altura inválida"
 	end
-
 	return true
 end
 
--- Valida o "pé" (4 cantos + centro) de uma peça. Use para construções.
 function IslandService.CanBuildBox(player, cframe, size)
 	if typeof(cframe) ~= "CFrame" or typeof(size) ~= "Vector3" then
 		return false, "Dados inválidos"
 	end
-
 	local hx, hz = size.X / 2, size.Z / 2
-	local offsets = {
-		Vector3.new(0, 0, 0),
-		Vector3.new(hx, 0, hz),
-		Vector3.new(-hx, 0, hz),
-		Vector3.new(hx, 0, -hz),
-		Vector3.new(-hx, 0, -hz),
-	}
-
+	local offsets = { Vector3.new(0, 0, 0), Vector3.new(hx, 0, hz), Vector3.new(-hx, 0, hz), Vector3.new(hx, 0, -hz), Vector3.new(-hx, 0, -hz) }
 	for _, offset in ipairs(offsets) do
 		local ok, reason = IslandService.CanBuildAt(player, (cframe * CFrame.new(offset)).Position)
-		if not ok then
-			return false, reason
-		end
+		if not ok then return false, reason end
 	end
 	return true
 end
@@ -523,36 +548,54 @@ function IslandService.OnReleased(callback)
 	table.insert(releasedCallbacks, callback)
 end
 
--- Mostra o estado das 12 ilhas no Output (útil nos testes)
 function IslandService.PrintStatus()
 	print("[IslandService] ===== STATUS DAS ILHAS =====")
-	for index = 1, #states do
+	local list = {}
+	for index in pairs(states) do table.insert(list, index) end
+	table.sort(list)
+	for _, index in ipairs(list) do
 		local state = states[index]
-		print(string.format("  Ilha %02d | %-8s | %s", index, state.State, state.OwnerName ~= "" and state.OwnerName or "-"))
+		print(string.format(" Ilha %02d | %-8s | %-20s | ângulo %4d° | %s", index, state.State, state.OwnerName,
+			math.floor(math.deg(state.Angle) % 360), state.Ready and "pronta" or "construindo"))
 	end
-	print(string.format("  Fila de espera: %d", #waiting))
+	print(string.format(" Total: %d ilha(s)", #list))
 end
 
--- Funções de TESTE (só funcionam com GameConfig.Debug = true)
+-- Funções de TESTE (só com GameConfig.Debug = true)
 function IslandService.Debug_SimulateLeave(player)
-	if not GameConfig.Debug then
-		return false
-	end
+	if not GameConfig.Debug then return false end
 	onPlayerRemoving(player)
 	return true
 end
 
 function IslandService.Debug_SimulateRejoin(player)
-	if not GameConfig.Debug then
-		return false
-	end
+	if not GameConfig.Debug then return false end
 	assignPlayer(player, PlayerDataService.GetData(player))
 	return true
 end
 
--- ===========================================================================
--- CICLO DE VIDA
--- ===========================================================================
+----------------------------------------------------------------------
+-- Ciclo de vida
+----------------------------------------------------------------------
+-- Plataforma invisível, alta no céu, onde o jogador espera os dados carregarem (não cai no mar nem na ilha central)
+local function createArrivalSpawn()
+	local old = Workspace:FindFirstChild("ArrivalSpawn")
+	if old then old:Destroy() end
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "ArrivalSpawn"
+	spawn.Anchored = true
+	spawn.Neutral = true
+	spawn.Duration = 0
+	spawn.CanTouch = false
+	spawn.Transparency = 1
+	spawn.Size = Vector3.new(40, 2, 40)
+	local p = MapConfig.MainIsland.Position
+	spawn.Position = Vector3.new(p.X, 900, p.Z)
+	for _, child in ipairs(spawn:GetChildren()) do
+		if child:IsA("Decal") then child:Destroy() end
+	end
+	spawn.Parent = Workspace
+end
 
 function IslandService.Init()
 end
@@ -562,23 +605,12 @@ function IslandService.Start()
 		warn("[IslandService] MapService não está pronto. IslandService DESATIVADO.")
 		return
 	end
-
-	for _, slot in ipairs(MapService.GetIslandSlots()) do
-		local state = {
-			Index = slot.Index,
-			Slot = slot,
-			State = "Free",
-			Player = nil,
-			OwnerUserId = 0,
-			OwnerName = "",
-			ReserveToken = nil,
-			ReservedUntil = 0,
-		}
-		state.SubtitleLabel = slot.Sign and slot.Sign:FindFirstChild("Subtitle", true) or nil
-		state.TagGui, state.TagLabel = createTag(slot)
-		states[slot.Index] = state
-		refreshVisuals(state)
+	if not MapService.BuildIslandAt or not MapService.RemoveIsland then
+		warn("[IslandService] O MapService ainda não tem BuildIslandAt/RemoveIsland. Aplique o patch do MapService (INSTALAR.md). Ilhas dinâmicas DESATIVADAS.")
+		return
 	end
+
+	createArrivalSpawn()
 
 	Players.PlayerAdded:Connect(hookCharacter)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
@@ -586,12 +618,13 @@ function IslandService.Start()
 		hookCharacter(player)
 	end
 
-	-- A ilha só é atribuída depois que os dados do jogador carregam
+	-- a ilha só é criada depois que os dados do jogador carregam
 	PlayerDataService.OnLoaded(function(player, data)
 		assignPlayer(player, data)
 	end)
 
-	log(string.format("Pronto. %d ilhas gerenciadas.", #states))
+	log("Pronto. Ilhas dinâmicas ativas (uma por jogador).")
 end
 
 return IslandService
+
