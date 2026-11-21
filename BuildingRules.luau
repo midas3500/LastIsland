@@ -1,147 +1,83 @@
---[[
-	BuildingRules (ModuleScript)
-	Local: ReplicatedStorage > Modules > BuildingRules   (arquivo NOVO)
-
-	Regras de construção usadas pelo SERVIDOR (que decide de verdade) e pelo CLIENTE
-	(só para colorir a pré-visualização). Assim os dois calculam a mesma coisa.
-]]
-
+--[[ BuildingRules (v3) - ReplicatedStorage > Modules  (SUBSTITUI). Usado pelo servidor e pelo cliente. ]]
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
-
-local BuildingConfig = require(script.Parent:WaitForChild("BuildingConfig"))
+local Config = require(script.Parent:WaitForChild("BuildingConfig"))
 
 local Rules = {}
 
-function Rules.Step()
-	return BuildingConfig.GridSize / 2
-end
-
--- Encaixa a posição (relativa ao centro da ilha). Retorna rx, rz.
-function Rules.SnapRelative(center, raw)
-	local step = Rules.Step()
-	local rx = math.floor((raw.X - center.X) / step + 0.5) * step
-	local rz = math.floor((raw.Z - center.Z) / step + 0.5) * step
-	return rx, rz
+function Rules.Snap(v)
+	local step = Config.GridSize / 2
+	return math.floor(v / step + 0.5) * step
 end
 
 function Rules.SnapYaw(yaw)
-	local step = BuildingConfig.RotationStep
+	local step = Config.RotationStep
 	if type(yaw) ~= "number" or yaw ~= yaw or math.abs(yaw) > 1e6 then
 		yaw = 0
 	end
 	return (math.floor(yaw / step + 0.5) * step) % 360
 end
 
-function Rules.CFrameFor(center, groundY, rx, rz, yaw)
-	return CFrame.new(center.X + rx, groundY, center.Z + rz) * CFrame.Angles(0, math.rad(yaw), 0)
+function Rules.CFrameFor(x, y, z, yaw)
+	return CFrame.new(x, y, z) * CFrame.Angles(0, math.rad(yaw), 0)
 end
 
--- Centro + 4 cantos da base da peça
+-- centro + 4 cantos da base
 function Rules.FootprintPoints(cf, size)
 	local hx, hz = size.X / 2, size.Z / 2
-	local points = {}
-	for _, offset in ipairs({
-		Vector3.new(0, 0, 0),
-		Vector3.new(hx, 0, hz),
-		Vector3.new(-hx, 0, hz),
-		Vector3.new(hx, 0, -hz),
-		Vector3.new(-hx, 0, -hz),
-		}) do
-		table.insert(points, (cf * CFrame.new(offset)).Position)
+	local out = {}
+	for _, o in ipairs({ Vector3.new(0, 0, 0), Vector3.new(hx, 0, hz), Vector3.new(-hx, 0, hz), Vector3.new(hx, 0, -hz), Vector3.new(-hx, 0, -hz) }) do
+		table.insert(out, (cf * CFrame.new(o)).Position)
 	end
-	return points
+	return out
 end
 
--- Todos os pontos da base precisam estar dentro do raio de construção da ilha
-function Rules.InsideBuildArea(center, buildRadius, cf, size)
-	for _, point in ipairs(Rules.FootprintPoints(cf, size)) do
-		local dx, dz = point.X - center.X, point.Z - center.Z
-		if dx * dx + dz * dz > buildRadius * buildRadius then
-			return false
-		end
+local function layerOf(inst)
+	local c = inst
+	while c and c ~= Workspace do
+		local l = c:GetAttribute("BuildingLayer")
+		if l then return l end
+		c = c.Parent
 	end
-	return true
 end
 
-local function layerOf(instance)
-	local current = instance
-	while current and current ~= Workspace do
-		local layer = current:GetAttribute("BuildingLayer")
-		if layer then
-			return layer
-		end
-		current = current.Parent
-	end
-	return nil
-end
-
-local function isResourceNode(instance)
-	local current = instance
-	while current and current ~= Workspace do
-		if CollectionService:HasTag(current, "ResourceNode") then
-			return true
-		end
-		current = current.Parent
+local function isResource(inst)
+	local c = inst
+	while c and c ~= Workspace do
+		if CollectionService:HasTag(c, "ResourceNode") then return true end
+		c = c.Parent
 	end
 	return false
 end
 
--- Pastas onde procurar obstáculos: o modelo da ilha, as construções e os recursos
-function Rules.GetScope(islandModel)
-	local scope = {}
-	if islandModel then
-		table.insert(scope, islandModel)
-	end
-	local buildings = Workspace:FindFirstChild(BuildingConfig.FolderName)
-	if buildings then
-		table.insert(scope, buildings)
-	end
-	local map = Workspace:FindFirstChild("Map")
-	local spawns = map and map:FindFirstChild("ResourceSpawns")
-	if spawns then
-		table.insert(scope, spawns)
-	end
-	return scope
-end
+-- ignore = instâncias a ignorar (personagens, fantasma). Retorna nil (livre) ou o motivo.
+function Rules.FindConflict(def, cf, ignore)
+	local allowed = Config.Layers[def.Layer] or {}
+	local pad = Config.OverlapPadding
+	local y0, y1 = 0.2, math.max(def.Size.Y - 0.1, 0.5)
 
--- Retorna nil (livre) ou o motivo do conflito
-function Rules.FindConflict(def, cf, scope)
-	local allowed = BuildingConfig.Layers[def.Layer] or {}
-	local pad = BuildingConfig.OverlapPadding
-	local y0 = 0.2
-	local y1 = math.max(def.Size.Y - 0.1, 0.5)
-
-	local boxSize = Vector3.new(
-		math.max(def.Size.X - 2 * pad, 0.2),
-		y1 - y0,
-		math.max(def.Size.Z - 2 * pad, 0.2)
-	)
-
+	local ignoreList = { Workspace.Terrain }
+	for _, i in ipairs(ignore or {}) do
+		table.insert(ignoreList, i)
+	end
 	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = scope
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignoreList
 	params.MaxParts = 60
 
-	local parts = Workspace:GetPartBoundsInBox(cf * CFrame.new(0, (y0 + y1) / 2, 0), boxSize, params)
-
-	for _, part in ipairs(parts) do
+	local size = Vector3.new(math.max(def.Size.X - 2 * pad, 0.2), y1 - y0, math.max(def.Size.Z - 2 * pad, 0.2))
+	for _, part in ipairs(Workspace:GetPartBoundsInBox(cf * CFrame.new(0, (y0 + y1) / 2, 0), size, params)) do
 		local layer = layerOf(part)
 		if layer then
-			if not allowed[layer] then
-				return "Já existe uma construção neste local"
-			end
-		elseif isResourceNode(part) then
-			return "Há um recurso neste local"
-		elseif part:GetAttribute("ResourceType") ~= nil then
-			-- marcador invisível de recurso: ignora
-		elseif part.Transparency >= 0.95 and not part.CanCollide then
-			-- peça auxiliar invisível: ignora
-		else
-			return "Há um objeto neste local"
+			if not allowed[layer] then return "Já existe uma construção aqui" end
+		elseif isResource(part) then
+			return "Há um recurso aqui"
+		elseif part:GetAttribute("ResourceType") ~= nil or (part.Transparency >= 0.95 and not part.CanCollide) then
+			-- marcador/peça invisível: ignora
+		elseif part.CanCollide then
+			return "Há um objeto aqui"
 		end
 	end
-
 	return nil
 end
 

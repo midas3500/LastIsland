@@ -39,7 +39,7 @@ local function add(ctx, name, size, cframe, material, color, opts)
 	opts = opts or {}
 	local part = Instance.new("Part")
 	part.Name = name
-	part.Anchored = true
+	part.Anchored = not ctx.dynamic
 	part.CanTouch = false
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
@@ -277,7 +277,30 @@ builders.Tower = function(ctx)
 	addLight(ctx, lamp, P.LampGlow, 30, 1.3)
 end
 
--- ===========================================================================
+builders.Boat = function(ctx)
+	-- casco (Hull) + bancos laterais + proa em V + mastro e vela. Tudo soldado ao Hull no servidor.
+	add(ctx, "Hull", Vector3.new(3.6, 0.5, 7), CFrame.new(0, 0.45, 0), Enum.Material.WoodPlanks, P.Wood)
+	for _, s in ipairs({ -1, 1 }) do
+		block(ctx, "Side", Vector3.new(0.3, 1.1, 7), s * 1.65, 0.45, 0, Enum.Material.WoodPlanks, P.WoodDark)
+		add(ctx, "Bow", Vector3.new(2.2, 1.1, 0.3), CFrame.new(s * 0.85, 1.0, -3.6) * CFrame.Angles(0, s * math.rad(35), 0), Enum.Material.WoodPlanks, P.WoodDark)
+	end
+	block(ctx, "Stern", Vector3.new(3.6, 1.1, 0.3), 0, 0.45, 3.35, Enum.Material.WoodPlanks, P.WoodDark)
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "Seat"
+	seat.Size = Vector3.new(2, 0.6, 2)
+	seat.CFrame = CFrame.new(0, 1.0, 1.4)
+	seat.Anchored = not ctx.dynamic
+	seat.Color = P.WoodDark
+	seat.Material = Enum.Material.Wood
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	if ctx.preview then seat.CanCollide = false seat.CanQuery = false end
+	seat.Parent = ctx.model
+	block(ctx, "Mast", Vector3.new(0.25, 5, 0.25), 0, 0.7, -1.0, Enum.Material.Wood, P.WoodDark)
+	block(ctx, "Sail", Vector3.new(0.1, 3.4, 2.6), 0, 2.4, -1.0, Enum.Material.Fabric, P.White, { CanCollide = false })
+end
+
+-- ==========================================================================
 -- API
 -- ===========================================================================
 
@@ -286,10 +309,35 @@ function BuildingModels.Has(typeName)
 end
 
 function BuildingModels.Build(typeName, preview)
+	-- modelo do Blender: ReplicatedStorage > BuildingAssets > <Tipo>
+	local assets = game:GetService("ReplicatedStorage"):FindFirstChild("BuildingAssets")
+	local asset = assets and assets:FindFirstChild(typeName)
+	if asset and asset:IsA("Model") then
+		local clone = asset:Clone()
+		clone.Name = typeName
+		if not clone.PrimaryPart then
+			local r = Instance.new("Part")
+			r.Name = "Root" r.Size = Vector3.new(0.2, 0.2, 0.2) r.Transparency = 1 r.CanCollide = false r.CanQuery = false
+			r.CFrame = clone:GetPivot() r.Parent = clone
+			clone.PrimaryPart = r
+		end
+		for _, d in ipairs(clone:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.Anchored = not (typeName == "Boat" and not preview)
+				if preview then d.CanCollide = false d.CanQuery = false d.CastShadow = false end
+			elseif preview and (d:IsA("Light") or d:IsA("Fire") or d:IsA("ParticleEmitter")) then
+				d:Destroy()
+			end
+		end
+		clone:SetAttribute("BuildingType", typeName)
+		return clone
+	end
+
 	local builder = builders[typeName]
 	if not builder then
 		error("[BuildingModels] Sem modelo para: " .. tostring(typeName))
 	end
+	local dynamic = (typeName == "Boat") and not preview
 
 	local model = Instance.new("Model")
 	model.Name = typeName
@@ -306,7 +354,22 @@ function BuildingModels.Build(typeName, preview)
 	root.Parent = model
 	model.PrimaryPart = root
 
-	builder({ model = model, preview = preview == true })
+	root.Anchored = not dynamic
+	builder({ model = model, preview = preview == true, dynamic = dynamic })
+
+	if dynamic then
+		local hull = model:FindFirstChild("Hull")
+		if hull then
+			for _, part in ipairs(model:GetDescendants()) do
+				if part:IsA("BasePart") and part ~= hull then
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = hull
+					weld.Part1 = part
+					weld.Parent = part
+				end
+			end
+		end
+	end
 
 	model:SetAttribute("BuildingType", typeName)
 	return model

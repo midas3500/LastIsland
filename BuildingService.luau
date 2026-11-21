@@ -1,32 +1,14 @@
 --[[
-	BuildingService (v2)
-	Local: ServerScriptService > Services > BuildingService   (SUBSTITUI o arquivo vazio)
+	BuildingService (v3)  -  ServerScriptService > Services > BuildingService  (SUBSTITUI)
 
-	Construção 100% validada no SERVIDOR. O cliente só manda "quero construir X aqui, girado Y".
-	O servidor recalcula a posição, confere tudo e só então gasta os materiais e cria a peça.
-
-	REGRAS (todas no servidor)
-		- o jogador precisa ter ilha e ser o dono; só constrói dentro da PRÓPRIA ilha
-		  (IslandService.CanBuildBox testa o centro e os 4 cantos da peça)
-		- terreno: o solo sob a peça precisa ser firme e estar no nível da ilha (raycast)
-		- espaço livre: sem sobrepor recursos, decoração, placa ou outras construções (BuildingRules)
-		- longe do ponto de nascimento da ilha e sem jogador dentro da peça
-		- limites: total por ilha (BuildingConfig.MaxBuildingsPerIsland) e por tipo (Max)
-		- materiais: tudo ou nada (InventoryService.RemoveItems)
-
-	PERSISTÊNCIA: data.Buildings = lista de { Id, Type, X, Z, Yaw, Items? }.
-	X e Z são RELATIVOS ao centro da ilha; se o jogador cair em outra ilha, a base vai junto.
-
-	COMUNICAÇÃO (remote BuildRequest)
-		Cliente -> Servidor:  "Place", tipo, posição(Vector3), rotação(graus)  |  "Remove", modelo
-		Servidor -> Cliente:  "Placed", tipo  |  "Removed", tipo  |  "Denied", texto  |  "Info", texto
-
-	API
-		BuildingService.GetBuildings(islandIndex)             -> lista de { Id, Type, Model }
-		BuildingService.IsProtected(position)                 -> true se há Torre de Proteção cobrindo
-		BuildingService.Debug_TryPlace(player, tipo, pos, yaw)-> ok, motivo (só com GameConfig.Debug = true)
+	Constrói em QUALQUER lugar do mapa, exceto: nadando, no ar, na água (barco é o contrário: só na água),
+	em terreno inclinado/irregular, sobre outros objetos ou com jogador dentro. O servidor decide tudo.
+	Remote BuildRequest:  cliente -> "Place", tipo, Vector3, giro | "Remove", modelo
+	                      servidor -> "Placed", tipo | "Removed", tipo | "Denied", texto | "Info", texto
+	Salva em data.Buildings = { Id, Type, X, Y, Z, Yaw, Items? }. As peças do jogador aparecem quando ele entra
+	e somem quando sai. Barco: VehicleSeat + flutuação simulada (controles padrão do Roblox, PC e celular).
+	API: BuildingService.IsProtected(posição) | BuildingService.GetBuildings(player)
 ]]
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -36,338 +18,375 @@ local HttpService = game:GetService("HttpService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local GameConfig = require(Modules:WaitForChild("GameConfig"))
 local ResourceConfig = require(Modules:WaitForChild("ResourceConfig"))
-local BuildingConfig = require(Modules:WaitForChild("BuildingConfig"))
-local BuildingRules = require(Modules:WaitForChild("BuildingRules"))
-local BuildingModels = require(Modules:WaitForChild("BuildingModels"))
+local MapConfig = require(Modules:WaitForChild("MapConfig"))
+local Config = require(Modules:WaitForChild("BuildingConfig"))
+local Rules = require(Modules:WaitForChild("BuildingRules"))
+local Models = require(Modules:WaitForChild("BuildingModels"))
 
 local Services = script.Parent
-local MapService = require(Services:WaitForChild("MapService"))
 local PlayerDataService = require(Services:WaitForChild("PlayerDataService"))
-local IslandService = require(Services:WaitForChild("IslandService"))
 local InventoryService = require(Services:WaitForChild("InventoryService"))
 
 local BuildingService = {}
 
--- ===========================================================================
--- ESTADO (só o servidor altera)
--- ===========================================================================
-
-local islands = {}        -- [indice] = { Index, Folder, OwnerUserId, Models, Records, Count, ByType }
-local lastRequest = {}    -- [Player] = os.clock() do último pedido
-local remote = nil
-local buildingsFolder = nil
+local owned = {}   -- [Player] = { Records, Models, Count, ByType }
+local boats = {}   -- [Model] = { Hull, Seat, Velocity, Aim, Yaw, TargetY, Record }
+local lastRequest = {}
+local remote, folder
 
 local function log(...)
-	if GameConfig.Debug then
-		print("[BuildingService]", ...)
-	end
+	if GameConfig.Debug then print("[BuildingService]", ...) end
 end
 
 local function send(player, action, payload)
-	if remote and player.Parent then
-		remote:FireClient(player, action, payload)
-	end
+	if remote and player.Parent then remote:FireClient(player, action, payload) end
 end
 
 local function deny(player, reason)
 	send(player, "Denied", reason)
-	log(string.format("Construção negada para %s: %s", player.Name, reason))
 	return false, reason
-end
-
-local function getState(index)
-	local state = islands[index]
-	if state then
-		return state
-	end
-	local folder = Instance.new("Folder")
-	folder.Name = string.format("Buildings_%02d", index)
-	folder.Parent = buildingsFolder
-	state = {
-		Index = index,
-		Folder = folder,
-		OwnerUserId = 0,
-		Models = {},
-		Records = {},
-		Count = 0,
-		ByType = {},
-	}
-	islands[index] = state
-	return state
-end
-
-local function clearIsland(state)
-	state.Folder:ClearAllChildren()
-	state.Models = {}
-	state.Records = {}
-	state.Count = 0
-	state.ByType = {}
-	state.OwnerUserId = 0
 end
 
 local function finite(n)
 	return type(n) == "number" and n == n and math.abs(n) < 1e6
 end
 
--- ===========================================================================
--- BAÚ (interação por ProximityPrompt: funciona igual no PC e no celular)
--- ===========================================================================
-
-local function chestTotal(record)
-	local total = 0
-	for _, amount in pairs(record.Items or {}) do
-		if type(amount) == "number" then
-			total += amount
-		end
+local function characters()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then table.insert(list, p.Character) end
 	end
-	return total
+	return list
 end
 
-local function refreshChestPrompts(model, record)
-	local total = chestTotal(record)
+-- ===========================================================================
+-- BAÚ (ProximityPrompt: funciona no PC e no celular)
+-- ===========================================================================
+local function chestTotal(rec)
+	local t = 0
+	for _, n in pairs(rec.Items or {}) do
+		if type(n) == "number" then t += n end
+	end
+	return t
+end
+
+local function refreshChest(model, rec)
+	local total = chestTotal(rec)
 	model:SetAttribute("Stored", total)
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("ProximityPrompt") then
-			descendant.ObjectText = string.format("Baú (%d/%d)", total, BuildingConfig.Chest.Capacity)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("ProximityPrompt") then
+			d.ObjectText = string.format("Baú (%d/%d)", total, Config.Chest.Capacity)
 		end
 	end
 end
 
-local function chestAllowed(player, state)
-	if state.OwnerUserId ~= player.UserId then
-		return false, "Este baú pertence a outro jogador."
+local function chestOwner(player, model)
+	if model:GetAttribute("OwnerUserId") ~= player.UserId then
+		send(player, "Denied", "Este baú é de outro jogador.")
+		return false
 	end
-	if not PlayerDataService.GetData(player) or PlayerDataService.IsReadOnly(player) then
-		return false, "Seus dados não estão disponíveis."
-	end
-	return true
+	return PlayerDataService.GetData(player) ~= nil and not PlayerDataService.IsReadOnly(player)
 end
 
-local function chestDeposit(player, state, record, model)
-	local ok, reason = chestAllowed(player, state)
-	if not ok then
-		return send(player, "Denied", reason)
+local function chestDeposit(player, rec, model)
+	if not chestOwner(player, model) then return end
+	rec.Items = rec.Items or {}
+	local room, moved = Config.Chest.Capacity - chestTotal(rec), 0
+	for item in pairs(ResourceConfig.Items) do
+		local n = math.min(InventoryService.GetCount(player, item), room)
+		if n >= 1 and InventoryService.RemoveItem(player, item, n, "ChestDeposit") then
+			rec.Items[item] = (rec.Items[item] or 0) + n
+			room -= n
+			moved += n
+		end
 	end
-	record.Items = record.Items or {}
+	refreshChest(model, rec)
+	send(player, moved > 0 and "Info" or "Denied", moved > 0 and ("Guardado: " .. moved) or (room <= 0 and "Baú cheio." or "Nada para guardar."))
+end
 
-	local room = BuildingConfig.Chest.Capacity - chestTotal(record)
+local function chestWithdraw(player, rec, model)
+	if not chestOwner(player, model) then return end
+	rec.Items = rec.Items or {}
 	local moved = 0
-	for itemName in pairs(ResourceConfig.Items) do
-		if room <= 0 then
-			break
-		end
-		local have = InventoryService.GetCount(player, itemName)
-		local amount = math.min(have, room)
-		if amount >= 1 and InventoryService.RemoveItem(player, itemName, amount, "ChestDeposit") then
-			record.Items[itemName] = (record.Items[itemName] or 0) + amount
-			room -= amount
-			moved += amount
-		end
-	end
-
-	refreshChestPrompts(model, record)
-	if moved > 0 then
-		send(player, "Info", string.format("Você guardou %d itens no baú.", moved))
-	elseif room <= 0 then
-		send(player, "Denied", "O baú está cheio.")
-	else
-		send(player, "Denied", "Você não tem nada para guardar.")
-	end
-end
-
-local function chestWithdraw(player, state, record, model)
-	local ok, reason = chestAllowed(player, state)
-	if not ok then
-		return send(player, "Denied", reason)
-	end
-	record.Items = record.Items or {}
-
-	local moved = 0
-	for itemName, amount in pairs(record.Items) do
-		if type(amount) == "number" and amount >= 1 and ResourceConfig.Items[itemName] then
-			local fits = math.min(amount, InventoryService.GetRoom(player, itemName))
-			if fits >= 1 then
-				local added = InventoryService.AddItem(player, itemName, fits, "ChestWithdraw")
-				if added > 0 then
-					record.Items[itemName] = amount - added
-					if record.Items[itemName] <= 0 then
-						record.Items[itemName] = nil
-					end
-					moved += added
-				end
+	for item, n in pairs(rec.Items) do
+		if type(n) == "number" and n >= 1 and ResourceConfig.Items[item] then
+			local added = InventoryService.AddItem(player, item, math.min(n, InventoryService.GetRoom(player, item)), "ChestWithdraw")
+			if added > 0 then
+				rec.Items[item] = (n - added > 0) and (n - added) or nil
+				moved += added
 			end
 		end
 	end
-
-	refreshChestPrompts(model, record)
-	if moved > 0 then
-		send(player, "Info", string.format("Você pegou %d itens do baú.", moved))
-	elseif chestTotal(record) <= 0 then
-		send(player, "Denied", "O baú está vazio.")
-	else
-		send(player, "Denied", "Sua mochila está cheia.")
-	end
+	refreshChest(model, rec)
+	send(player, moved > 0 and "Info" or "Denied", moved > 0 and ("Pegou: " .. moved) or (chestTotal(rec) <= 0 and "Baú vazio." or "Mochila cheia."))
 end
 
-local function setupChest(state, record, model)
-	local root = model.PrimaryPart
-	local point = Instance.new("Attachment")
-	point.Name = "PromptPoint"
-	point.Position = Vector3.new(0, 2.4, 0)
-	point.Parent = root
-
-	local function makePrompt(actionText, key, offsetY, callback)
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText = actionText
-		prompt.ObjectText = "Baú"
-		prompt.KeyboardKeyCode = key
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = 10
-		prompt.RequiresLineOfSight = false
-		prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
-		prompt.UIOffset = Vector2.new(0, offsetY)
-		prompt.Parent = point
-		prompt.Triggered:Connect(function(player)
-			local ok, err = pcall(callback, player, state, record, model)
-			if not ok then
-				warn("[BuildingService] Erro no baú: " .. tostring(err))
-			end
+local function setupChest(rec, model)
+	local att = Instance.new("Attachment")
+	att.Position = Vector3.new(0, 2.4, 0)
+	att.Parent = model.PrimaryPart
+	local function prompt(text, key, offset, fn)
+		local p = Instance.new("ProximityPrompt")
+		p.ActionText, p.ObjectText, p.KeyboardKeyCode = text, "Baú", key
+		p.HoldDuration, p.MaxActivationDistance, p.RequiresLineOfSight = 0, 10, false
+		p.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+		p.UIOffset = Vector2.new(0, offset)
+		p.Parent = att
+		p.Triggered:Connect(function(player)
+			local ok, err = pcall(fn, player, rec, model)
+			if not ok then warn("[BuildingService] baú: " .. tostring(err)) end
 		end)
 	end
-
-	makePrompt("Guardar tudo", Enum.KeyCode.E, 0, chestDeposit)
-	makePrompt("Pegar tudo", Enum.KeyCode.F, -60, chestWithdraw)
-	refreshChestPrompts(model, record)
+	prompt("Guardar tudo", Enum.KeyCode.E, 0, chestDeposit)
+	prompt("Pegar tudo", Enum.KeyCode.F, -60, chestWithdraw)
+	refreshChest(model, rec)
 end
 
 -- ===========================================================================
--- CRIAR / REMOVER PEÇAS NO MUNDO
+-- BARCO
 -- ===========================================================================
+local function setupBoat(model, rec)
+	local hull = model:FindFirstChild("Hull")
+	local seat = model:FindFirstChild("Seat")
+	if not hull or not seat then return end
 
-local function spawnBuilding(state, info, record)
-	local def = BuildingConfig.Buildings[record.Type]
-	local cf = BuildingRules.CFrameFor(info.Center, info.GroundY, record.X, record.Z, record.Yaw)
+	local att = Instance.new("Attachment")
+	att.Parent = hull
+	local lv = Instance.new("LinearVelocity")
+	lv.Attachment0 = att
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
+	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lv.MaxForce = 1e7
+	lv.VectorVelocity = Vector3.zero
+	lv.Parent = hull
+	local ao = Instance.new("AlignOrientation")
+	ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	ao.Attachment0 = att
+	ao.MaxTorque = 1e8
+	ao.Responsiveness = 25
+	ao.Parent = hull
 
-	local model = BuildingModels.Build(record.Type, false)
-	model.Name = record.Type .. "_" .. string.sub(record.Id, 1, 6)
-	model:PivotTo(cf)
-	model:SetAttribute("BuildingId", record.Id)
-	model:SetAttribute("BuildingLayer", def.Layer)
-	model:SetAttribute("OwnerUserId", state.OwnerUserId)
-	model:SetAttribute("IslandIndex", state.Index)
-	if def.ProtectionRadius then
-		model:SetAttribute("ProtectionRadius", def.ProtectionRadius)
-	end
-	model.Parent = state.Folder
-	CollectionService:AddTag(model, "Building")
-
-	if def.Storage then
-		setupChest(state, record, model)
-	end
-
-	state.Models[record.Id] = model
-	state.Records[record.Id] = record
-	state.Count += 1
-	state.ByType[record.Type] = (state.ByType[record.Type] or 0) + 1
-	return model
+	local _, yaw = hull.CFrame:ToEulerAnglesYXZ()
+	local offset = hull.Position.Y - model:GetPivot().Position.Y
+	boats[model] = { Hull = hull, Seat = seat, Velocity = lv, Aim = ao, Yaw = yaw, TargetY = rec.Y + offset - 0.45, Record = rec }
+	pcall(function() hull:SetNetworkOwner(nil) end)
 end
 
-local function despawnBuilding(state, id)
-	local model = state.Models[id]
-	local record = state.Records[id]
-	if model then
-		model:Destroy()
-	end
-	state.Models[id] = nil
-	state.Records[id] = nil
-	if record then
-		state.Count = math.max(0, state.Count - 1)
-		state.ByType[record.Type] = math.max(0, (state.ByType[record.Type] or 1) - 1)
-	end
-end
-
-local function recordIsValid(record, info)
-	if type(record) ~= "table" or not BuildingConfig.Buildings[record.Type] then
-		return false
-	end
-	if not finite(record.X) or not finite(record.Z) or not finite(record.Yaw) then
-		return false
-	end
-	local limit = info.BuildRadius + 0.5
-	return record.X * record.X + record.Z * record.Z <= limit * limit
-end
-
--- Reconstrói a base do jogador na ilha dele
-local function loadIsland(player, info, data)
-	local state = getState(info.Index)
-
-	-- reconexão dentro do tempo de reserva: a base ainda está lá
-	if state.OwnerUserId == player.UserId and state.Count > 0 then
-		return
-	end
-
-	clearIsland(state)
-	state.OwnerUserId = player.UserId
-
-	if type(data.Buildings) ~= "table" then
-		data.Buildings = {}
-	end
-
-	local loaded, skipped = 0, 0
-	for _, record in ipairs(data.Buildings) do
-		if recordIsValid(record, info) and state.Count < BuildingConfig.MaxBuildingsPerIsland then
-			record.Id = type(record.Id) == "string" and record.Id or HttpService:GenerateGUID(false)
-			local ok, err = pcall(spawnBuilding, state, info, record)
-			if ok then
-				loaded += 1
-			else
-				skipped += 1
-				warn("[BuildingService] Falha ao criar peça salva: " .. tostring(err))
-			end
+local function stepBoats(dt)
+	local speed, turn = Config.Boat.Speed, Config.Boat.TurnRate
+	for model, b in pairs(boats) do
+		if not model.Parent then
+			boats[model] = nil
 		else
-			skipped += 1 -- o registro NÃO é apagado do perfil, só deixa de aparecer
+			local throttle = b.Seat.Occupant and b.Seat.Throttle or 0
+			local steer = b.Seat.Occupant and b.Seat.Steer or 0
+			b.Yaw -= steer * turn * dt * (throttle >= 0 and 1 or -1)
+			local look = CFrame.Angles(0, b.Yaw, 0).LookVector
+			b.Aim.CFrame = CFrame.Angles(0, b.Yaw, 0)
+			b.Velocity.VectorVelocity = Vector3.new(look.X * throttle * speed, (b.TargetY - b.Hull.Position.Y) * 8, look.Z * throttle * speed)
 		end
 	end
-	log(string.format("Ilha %02d: %d peça(s) carregada(s), %d ignorada(s).", info.Index, loaded, skipped))
+end
+
+local function saveBoats()
+	for model, b in pairs(boats) do
+		if model.Parent then
+			local p = b.Hull.Position
+			b.Record.X, b.Record.Z, b.Record.Yaw = p.X, p.Z, math.deg(b.Yaw) % 360
+		end
+	end
+end
+
+-- ===========================================================================
+-- PEÇAS
+-- ===========================================================================
+local function spawnBuilding(player, state, rec)
+	local def = Config.Buildings[rec.Type]
+	local model = Models.Build(rec.Type, false)
+	model.Name = rec.Type .. "_" .. string.sub(rec.Id, 1, 6)
+	model:PivotTo(Rules.CFrameFor(rec.X, rec.Y, rec.Z, rec.Yaw))
+	model:SetAttribute("BuildingId", rec.Id)
+	model:SetAttribute("BuildingLayer", def.Layer)
+	model:SetAttribute("OwnerUserId", player.UserId)
+	if def.ProtectionRadius then model:SetAttribute("ProtectionRadius", def.ProtectionRadius) end
+	model.Parent = folder
+	CollectionService:AddTag(model, "Building")
+	if def.Storage then setupChest(rec, model) end
+	if def.Dynamic then setupBoat(model, rec) end
+	state.Records[rec.Id], state.Models[rec.Id] = rec, model
+	state.Count += 1
+	state.ByType[rec.Type] = (state.ByType[rec.Type] or 0) + 1
+end
+
+local function despawn(state, id)
+	local model, rec = state.Models[id], state.Records[id]
+	if model then
+		boats[model] = nil
+		model:Destroy()
+	end
+	state.Models[id], state.Records[id] = nil, nil
+	if rec then
+		state.Count = math.max(0, state.Count - 1)
+		state.ByType[rec.Type] = math.max(0, (state.ByType[rec.Type] or 1) - 1)
+	end
+end
+
+local function loadPlayer(player, data)
+	local state = { Records = {}, Models = {}, Count = 0, ByType = {} }
+	owned[player] = state
+	if type(data.Buildings) ~= "table" then data.Buildings = {} end
+	for _, rec in ipairs(data.Buildings) do
+		if type(rec) == "table" and Config.Buildings[rec.Type] and finite(rec.X) and finite(rec.Y) and finite(rec.Z) and finite(rec.Yaw) then
+			rec.Id = type(rec.Id) == "string" and rec.Id or HttpService:GenerateGUID(false)
+			local ok, err = pcall(spawnBuilding, player, state, rec)
+			if not ok then warn("[BuildingService] peça salva falhou: " .. tostring(err)) end
+		end
+	end
 end
 
 -- ===========================================================================
 -- VALIDAÇÃO
 -- ===========================================================================
+local function validate(player, typeName, rawPos, rawYaw)
+	local def = type(typeName) == "string" and Config.Buildings[typeName]
+	if not def then return false, "Peça inválida." end
+	if typeof(rawPos) ~= "Vector3" or not finite(rawPos.X) or not finite(rawPos.Z) then return false, "Posição inválida." end
 
-local function groundIsSolid(info, cf, size)
-	local base = info.Model and info.Model:FindFirstChild("Base")
-	if not base then
-		return true
+	local data, state = PlayerDataService.GetData(player), owned[player]
+	if not data or not state then return false, "Seus dados estão carregando." end
+	if PlayerDataService.IsReadOnly(player) then return false, "Dados em modo somente leitura." end
+
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not hum or not root or hum.Health <= 0 then return false, "Você não pode construir agora." end
+	if hum:GetState() == Enum.HumanoidStateType.Swimming then return false, "Não dá para construir nadando." end
+	if hum.FloorMaterial == Enum.Material.Air and not hum.SeatPart then return false, "Não dá para construir no ar." end
+
+	local x, z, yaw = Rules.Snap(rawPos.X), Rules.Snap(rawPos.Z), Rules.SnapYaw(rawYaw)
+	if (Vector3.new(x, 0, z) - Vector3.new(root.Position.X, 0, root.Position.Z)).Magnitude > Config.PlaceDistance then
+		return false, "Muito longe."
 	end
 
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { base }
+	if state.Count >= Config.MaxPerPlayer then return false, "Limite de construções atingido." end
+	if def.Max and (state.ByType[typeName] or 0) >= def.Max then
+		return false, string.format("Limite de %s atingido (%d).", def.DisplayName, def.Max)
+	end
 
-	local hx, hz = math.max(size.X / 2 - 0.1, 0), math.max(size.Z / 2 - 0.1, 0)
-	for _, offset in ipairs({
-		Vector3.new(0, 0, 0),
-		Vector3.new(hx, 0, hz),
-		Vector3.new(-hx, 0, hz),
-		Vector3.new(hx, 0, -hz),
-		Vector3.new(-hx, 0, -hz),
-		}) do
-		local origin = (cf * CFrame.new(offset)).Position + Vector3.new(0, 8, 0)
-		local hit = Workspace:Raycast(origin, Vector3.new(0, -24, 0), params)
-		if not hit or math.abs(hit.Position.Y - info.GroundY) > BuildingConfig.GroundTolerance then
-			return false
+	-- chão: raio para baixo a partir de pouco acima do jogador (detecta água)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = characters()
+	local originY = root.Position.Y + 6
+	local function ground(px, pz)
+		return Workspace:Raycast(Vector3.new(px, originY, pz), Vector3.new(0, -150, 0), params)
+	end
+
+	local center = ground(x, z)
+	if not center then return false, "Sem chão aqui." end
+	local isWater = center.Material == Enum.Material.Water
+	if def.Water then
+		if not isWater then return false, "O barco precisa ser colocado na água." end
+	else
+		if isWater then return false, "Não dá para construir na água." end
+		if center.Normal.Y < Config.MaxSlopeNormalY then return false, "Terreno muito inclinado." end
+	end
+
+	local y = center.Position.Y
+	local flat = Rules.CFrameFor(x, y, z, yaw)
+	for _, point in ipairs(Rules.FootprintPoints(flat, def.Size)) do
+		local hit = ground(point.X, point.Z)
+		local water = hit and hit.Material == Enum.Material.Water
+		if not hit or (water ~= (def.Water == true)) or math.abs(hit.Position.Y - y) > Config.GroundTolerance then
+			return false, def.Water and "Precisa de água em volta." or "Terreno irregular."
 		end
 	end
+
+	for _, rec in pairs(state.Records) do
+		if rec.Type == typeName and rec.X == x and rec.Z == z and rec.Yaw == yaw and math.abs(rec.Y - y) < 0.1 then
+			return false, "Já existe uma peça igual aqui."
+		end
+	end
+
+	local conflict = Rules.FindConflict(def, flat, characters())
+	if conflict then return false, conflict end
+
+	if def.Layer ~= "Floor" then
+		for _, other in ipairs(Players:GetPlayers()) do
+			local r = other.Character and other.Character:FindFirstChild("HumanoidRootPart")
+			if r then
+				local rel = flat:PointToObjectSpace(r.Position)
+				if math.abs(rel.X) <= def.Size.X / 2 + 1 and math.abs(rel.Z) <= def.Size.Z / 2 + 1 and rel.Y >= -1 and rel.Y <= def.Size.Y then
+					return false, "Há um jogador no local."
+				end
+			end
+		end
+	end
+
+	if not InventoryService.HasItems(player, def.Cost) then return false, "Materiais insuficientes." end
+	return true, { Def = def, State = state, Data = data, X = x, Y = y, Z = z, Yaw = yaw }
+end
+
+local function place(player, typeName, rawPos, rawYaw)
+	local ok, r = validate(player, typeName, rawPos, rawYaw)
+	if not ok then return deny(player, r) end
+	if not InventoryService.RemoveItems(player, r.Def.Cost, "Build:" .. typeName) then return deny(player, "Materiais insuficientes.") end
+
+	local rec = { Id = HttpService:GenerateGUID(false), Type = typeName, X = r.X, Y = r.Y, Z = r.Z, Yaw = r.Yaw }
+	if r.Def.Storage then rec.Items = {} end
+	local created, err = pcall(spawnBuilding, player, r.State, rec)
+	if not created then
+		warn("[BuildingService] erro ao criar: " .. tostring(err))
+		for item, n in pairs(r.Def.Cost) do InventoryService.AddItem(player, item, n, "BuildRefund") end
+		return deny(player, "Erro interno ao construir.")
+	end
+	table.insert(r.Data.Buildings, rec)
+	send(player, "Placed", typeName)
 	return true
 end
 
-local function playerInside(cf, size)
-	for _, other in ipairs(Players:GetPlayers()) do
-		local root = other.Character and other.Character:FindFirstChild("HumanoidRootPart")
-		if root then
-			local rel = cf:PointToObjectSpace(root.Position)
-			if math.abs(rel.X) <= size.X / 2 + 1 and math.abs(rel.Z) <= size.Z / 2 + 1 and rel.Y >= -1 and rel.Y <= size.Y then
+local function remove(player, model)
+	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model:IsDescendantOf(folder) then return deny(player, "Peça inválida.") end
+	local state, id = owned[player], model:GetAttribute("BuildingId")
+	local rec = state and type(id) == "string" and state.Records[id]
+	if not rec or state.Models[id] ~= model or model:GetAttribute("OwnerUserId") ~= player.UserId then
+		return deny(player, "Esta construção não é sua.")
+	end
+	local data = PlayerDataService.GetData(player)
+	if not data or PlayerDataService.IsReadOnly(player) then return deny(player, "Dados indisponíveis.") end
+	if chestTotal(rec) > 0 then return deny(player, "Esvazie o baú antes.") end
+	local boat = boats[model]
+	if boat and boat.Seat.Occupant then return deny(player, "Há alguém no barco.") end
+
+	for item, n in pairs(Config.Buildings[rec.Type].Cost) do
+		local back = math.floor(n * Config.RefundRatio)
+		if back >= 1 then InventoryService.AddItem(player, item, back, "BuildRefund") end
+	end
+	for i, saved in ipairs(data.Buildings) do
+		if saved == rec then table.remove(data.Buildings, i) break end
+	end
+	local typeName = rec.Type
+	despawn(state, id)
+	send(player, "Removed", typeName)
+	return true
+end
+
+-- ===========================================================================
+-- API / CICLO DE VIDA
+-- ===========================================================================
+function BuildingService.GetBuildings(player)
+	local list, state = {}, owned[player]
+	if state then
+		for id, rec in pairs(state.Records) do table.insert(list, { Id = id, Type = rec.Type, Model = state.Models[id] }) end
+	end
+	return list
+end
+
+function BuildingService.IsProtected(position)
+	for _, state in pairs(owned) do
+		for id, rec in pairs(state.Records) do
+			local def, model = Config.Buildings[rec.Type], state.Models[id]
+			if def and def.ProtectionRadius and model and (model:GetPivot().Position - position).Magnitude <= def.ProtectionRadius then
 				return true
 			end
 		end
@@ -375,318 +394,55 @@ local function playerInside(cf, size)
 	return false
 end
 
--- Retorna true, dados  |  false, motivo
-local function validate(player, typeName, rawPosition, rawYaw)
-	if type(typeName) ~= "string" then
-		return false, "Peça inválida."
-	end
-	local def = BuildingConfig.Buildings[typeName]
-	if not def or not BuildingModels.Has(typeName) then
-		return false, "Peça inválida."
-	end
-	if typeof(rawPosition) ~= "Vector3" or not finite(rawPosition.X) or not finite(rawPosition.Y) or not finite(rawPosition.Z) then
-		return false, "Posição inválida."
-	end
-
-	local data = PlayerDataService.GetData(player)
-	if not data then
-		return false, "Seus dados ainda estão carregando."
-	end
-	if PlayerDataService.IsReadOnly(player) then
-		return false, "Seus dados estão em modo somente leitura."
-	end
-
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not root or humanoid.Health <= 0 then
-		return false, "Você não pode construir agora."
-	end
-
-	local info = IslandService.GetIslandOf(player)
-	if not info then
-		return false, "Você ainda não tem uma ilha."
-	end
-	local state = islands[info.Index]
-	if not state or state.OwnerUserId ~= player.UserId then
-		return false, "Sua ilha ainda está carregando."
-	end
-
-	-- posição e rotação recalculadas pelo SERVIDOR
-	local rx, rz = BuildingRules.SnapRelative(info.Center, rawPosition)
-	local yaw = BuildingRules.SnapYaw(rawYaw)
-	local cf = BuildingRules.CFrameFor(info.Center, info.GroundY, rx, rz, yaw)
-
-	if (root.Position - cf.Position).Magnitude > BuildingConfig.PlaceDistance then
-		return false, "Muito longe para construir."
-	end
-
-	-- PROPRIEDADE: dentro da própria ilha (centro + 4 cantos)
-	local inside, reason = IslandService.CanBuildBox(player, cf, def.Size)
-	if not inside then
-		return false, reason or "Fora da sua ilha."
-	end
-
-	-- limites
-	if state.Count >= BuildingConfig.MaxBuildingsPerIsland then
-		return false, "Limite de construções da ilha atingido."
-	end
-	if def.Max and (state.ByType[typeName] or 0) >= def.Max then
-		return false, string.format("Limite de %s atingido (%d).", def.DisplayName, def.Max)
-	end
-
-	-- longe do ponto de nascimento
-	local dx, dz = cf.Position.X - info.Center.X, cf.Position.Z - info.Center.Z
-	local spawnLimit = BuildingConfig.SpawnClearance + math.max(def.Size.X, def.Size.Z) / 2
-	if def.Layer ~= "Floor" and dx * dx + dz * dz < spawnLimit * spawnLimit then
-		return false, "Deixe livre a área de nascimento da ilha."
-	end
-
-	-- TERRENO
-	if not groundIsSolid(info, cf, def.Size) then
-		return false, "Terreno inválido: construa sobre a grama da sua ilha."
-	end
-
-	-- peça igual no mesmo lugar
-	for _, record in pairs(state.Records) do
-		if record.Type == typeName and record.X == rx and record.Z == rz and record.Yaw == yaw then
-			return false, "Já existe uma peça igual neste local."
-		end
-	end
-
-	-- espaço livre
-	local conflict = BuildingRules.FindConflict(def, cf, BuildingRules.GetScope(info.Model))
-	if conflict then
-		return false, conflict
-	end
-
-	if def.Layer ~= "Floor" and playerInside(cf, def.Size) then
-		return false, "Há um jogador no local."
-	end
-
-	-- materiais
-	if not InventoryService.HasItems(player, def.Cost) then
-		return false, "Materiais insuficientes."
-	end
-
-	return true, { Def = def, Info = info, State = state, X = rx, Z = rz, Yaw = yaw, Data = data }
-end
-
--- ===========================================================================
--- AÇÕES
--- ===========================================================================
-
-local function place(player, typeName, rawPosition, rawYaw)
-	local ok, result = validate(player, typeName, rawPosition, rawYaw)
-	if not ok then
-		return deny(player, result)
-	end
-
-	local def, info, state, data = result.Def, result.Info, result.State, result.Data
-
-	if not InventoryService.RemoveItems(player, def.Cost, "Build:" .. typeName) then
-		return deny(player, "Materiais insuficientes.")
-	end
-
-	local record = {
-		Id = HttpService:GenerateGUID(false),
-		Type = typeName,
-		X = result.X,
-		Z = result.Z,
-		Yaw = result.Yaw,
-	}
-	if def.Storage then
-		record.Items = {}
-	end
-
-	if type(data.Buildings) ~= "table" then
-		data.Buildings = {}
-	end
-
-	local created, err = pcall(spawnBuilding, state, info, record)
-	if not created then
-		warn("[BuildingService] Erro ao criar peça: " .. tostring(err))
-		for item, amount in pairs(def.Cost) do
-			InventoryService.AddItem(player, item, amount, "BuildRefund")
-		end
-		return deny(player, "Erro interno ao construir.")
-	end
-
-	table.insert(data.Buildings, record)
-	send(player, "Placed", typeName)
-	log(string.format("%s construiu %s na ilha %02d", player.Name, typeName, info.Index))
-	return true
-end
-
-local function remove(player, model)
-	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model:IsDescendantOf(buildingsFolder) then
-		return deny(player, "Peça inválida.")
-	end
-
-	local id = model:GetAttribute("BuildingId")
-	local index = model:GetAttribute("IslandIndex")
-	local state = type(index) == "number" and islands[index] or nil
-	local record = state and type(id) == "string" and state.Records[id] or nil
-	if not record or state.Models[id] ~= model then
-		return deny(player, "Peça inválida.")
-	end
-
-	if not IslandService.IsOwner(player, state.Index) or state.OwnerUserId ~= player.UserId then
-		return deny(player, "Esta construção pertence a outro jogador.")
-	end
-
-	local data = PlayerDataService.GetData(player)
-	if not data or PlayerDataService.IsReadOnly(player) then
-		return deny(player, "Seus dados não estão disponíveis.")
-	end
-
-	if chestTotal(record) > 0 then
-		return deny(player, "Esvazie o baú antes de demolir.")
-	end
-
-	local def = BuildingConfig.Buildings[record.Type]
-	local refund = {}
-	for item, amount in pairs(def.Cost) do
-		local back = math.floor(amount * BuildingConfig.RefundRatio)
-		if back >= 1 then
-			refund[item] = InventoryService.AddItem(player, item, back, "BuildRefund")
-		end
-	end
-
-	-- tira do perfil e do mundo
-	for index, saved in ipairs(data.Buildings) do
-		if saved == record then
-			table.remove(data.Buildings, index)
-			break
-		end
-	end
-	despawnBuilding(state, id)
-
-	send(player, "Removed", record.Type)
-	log(string.format("%s demoliu %s", player.Name, record.Type))
-	return true
-end
-
--- ===========================================================================
--- API
--- ===========================================================================
-
-function BuildingService.GetBuildings(islandIndex)
-	local list = {}
-	local state = islands[islandIndex]
-	if state then
-		for id, record in pairs(state.Records) do
-			table.insert(list, { Id = id, Type = record.Type, Model = state.Models[id] })
-		end
-	end
-	return list
-end
-
--- Há alguma Torre de Proteção cobrindo esta posição? (para o EventService usar nos desastres)
-function BuildingService.IsProtected(position)
-	for _, state in pairs(islands) do
-		for id, record in pairs(state.Records) do
-			local def = BuildingConfig.Buildings[record.Type]
-			local model = state.Models[id]
-			if def and def.ProtectionRadius and model then
-				if (model:GetPivot().Position - position).Magnitude <= def.ProtectionRadius then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
-function BuildingService.Debug_TryPlace(player, typeName, position, yaw)
-	if not GameConfig.Debug then
-		return false, "Debug desligado"
-	end
-	return place(player, typeName, position, yaw or 0)
-end
-
--- ===========================================================================
--- CICLO DE VIDA
--- ===========================================================================
-
-function BuildingService.Init()
-end
+function BuildingService.Init() end
 
 function BuildingService.Start()
 	remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("BuildRequest")
+	folder = Workspace:FindFirstChild(Config.FolderName) or Instance.new("Folder")
+	folder.Name = Config.FolderName
+	folder.Parent = Workspace
 
-	buildingsFolder = Workspace:FindFirstChild(BuildingConfig.FolderName)
-	if not buildingsFolder then
-		buildingsFolder = Instance.new("Folder")
-		buildingsFolder.Name = BuildingConfig.FolderName
-		buildingsFolder.Parent = Workspace
-	end
-
-	if not MapService.IsReady() then
-		warn("[BuildingService] MapService não está pronto. BuildingService DESATIVADO.")
-		return
-	end
-
-	-- o cliente precisa saber o centro da ilha para a pré-visualização
-	for _, slot in ipairs(MapService.GetIslandSlots()) do
-		slot.Model:SetAttribute("CenterX", slot.Center.X)
-		slot.Model:SetAttribute("CenterZ", slot.Center.Z)
-		getState(slot.Index)
-	end
-
-	IslandService.OnAssigned(function(player, info)
-		local data = PlayerDataService.GetData(player)
-		if not data then
-			return
-		end
-		local ok, err = pcall(loadIsland, player, info, data)
-		if not ok then
-			warn("[BuildingService] Erro ao carregar a ilha: " .. tostring(err))
-		end
+	PlayerDataService.OnLoaded(function(player, data)
+		local ok, err = pcall(loadPlayer, player, data)
+		if not ok then warn("[BuildingService] erro ao carregar: " .. tostring(err)) end
 	end)
-
-	-- jogadores que já receberam ilha antes deste Start
 	for _, player in ipairs(Players:GetPlayers()) do
-		local info = IslandService.GetIslandOf(player)
 		local data = PlayerDataService.GetData(player)
-		if info and data then
-			pcall(loadIsland, player, info, data)
-		end
+		if data and not owned[player] then pcall(loadPlayer, player, data) end
 	end
-
-	-- ilha liberada (reserva expirou): a base some do mundo; continua salva no perfil do dono
-	IslandService.OnReleased(function(info)
-		local state = islands[info.Index]
-		if state then
-			clearIsland(state)
-		end
-	end)
 
 	remote.OnServerEvent:Connect(function(player, action, a, b, c)
-		local cooldown = GameConfig.Security.RemoteCooldowns.BuildRequest or 0.5
-		local now = os.clock()
-		if lastRequest[player] and now - lastRequest[player] < cooldown then
-			return
-		end
+		local now, cd = os.clock(), GameConfig.Security.RemoteCooldowns.BuildRequest or 0.5
+		if lastRequest[player] and now - lastRequest[player] < cd then return end
 		lastRequest[player] = now
-
 		local ok, err = pcall(function()
-			if action == "Place" then
-				place(player, a, b, c)
-			elseif action == "Remove" then
-				remove(player, a)
-			end
+			if action == "Place" then place(player, a, b, c) elseif action == "Remove" then remove(player, a) end
 		end)
 		if not ok then
-			warn("[BuildingService] Erro no pedido: " .. tostring(err))
+			warn("[BuildingService] " .. tostring(err))
 			send(player, "Denied", "Erro interno.")
 		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		lastRequest[player] = nil
+		saveBoats()
+		local state = owned[player]
+		if state then
+			for id in pairs(table.clone(state.Models)) do despawn(state, id) end
+			owned[player] = nil
+		end
 	end)
 
+	task.spawn(function()
+		local acc = 0
+		while true do
+			local dt = task.wait(0.05)
+			stepBoats(dt)
+			acc += dt
+			if acc >= 3 then acc = 0 saveBoats() end
+		end
+	end)
 	log("Pronto.")
 end
 
